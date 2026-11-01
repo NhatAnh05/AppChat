@@ -18,7 +18,7 @@ export default function App() {
   const [account, setAccount] = useState<DemoAccount | null>(() => getDemoSession());
   const [profileOpen, setProfileOpen] = useState(false);
   const [notifications, setNotifications] = useState(() => readDemo('notifications', true));
-  const { conversations, messages, sendMessage, addConversation, changeMessage, deleteMessage } = useDemoChats();
+  const { conversations, messages, sendMessage, addConversation, changeMessage, deleteMessage, updateConversation, removeConversation } = useDemoChats();
   const [section, setSection] = useState<Section>('chats');
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
@@ -33,7 +33,7 @@ export default function App() {
   if (profileOpen) return <ProfilePage account={account} onBack={() => setProfileOpen(false)} onSave={value => { const accounts = readDemo<Record<string, DemoAccount>>('accounts', {}); saveDemo('accounts', {...accounts,[value.email]:value}); setDemoSession(value); setAccount(value); setProfileOpen(false); }} />;
   return <div className={`app-shell ${mobileChat ? 'is-mobile-chat' : ''} ${details ? 'details-open' : ''}`}>
     <Rail active={section} onChange={selectSection} onSettings={() => setModal('settings')} onGroups={() => {setSection('chats');setFilter('groups');setDetails(false);}} onCalls={() => setModal('call')} accountName={account.name}/>
-    <Sidebar conversations={conversations} section={section} filter={filter} onFilter={setFilter} search={search} onSearch={setSearch} selected={selected} onSelect={setSelected} onNewChat={() => setModal('new')} onShowChat={() => setMobileChat(true)}/>
+    <Sidebar conversations={conversations} section={section} filter={filter} onFilter={setFilter} search={search} onSearch={setSearch} selected={selected} onSelect={setSelected} onNewChat={() => setModal('new')} onShowChat={() => setMobileChat(true)} onUpdateChat={updateConversation} onRemoveChat={id => {removeConversation(id);if(selected === id)setSelected("");}}/>
     <ChatPanel key={selected} messages={messages[selected] ?? []} onSend={value => sendMessage(selected, value)} onEdit={(id, text) => changeMessage(selected, id, text)} onDelete={id => deleteMessage(selected, id)} chat={section === 'contacts' ? undefined : chat} onBack={() => setMobileChat(false)} onDetails={() => setDetails(value => !value)} onOpenCallPreview={() => setModal('call')}/>
     {details && chat && section !== 'contacts' && <DetailsPanel key={chat.id} chat={chat} onClose={() => setDetails(false)}/>}
     {modal && <div className="modal-backdrop" onMouseDown={(e) => {if (e.target === e.currentTarget) setModal(null);}}><div className="modal" role="dialog" aria-modal="true" aria-label={modal === 'new' ? 'Tin nhắn mới' : modal === 'settings' ? 'Cài đặt giao diện' : 'Gọi thoại và video'}>

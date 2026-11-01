@@ -68,3 +68,6 @@
 
 /* Message lifecycle controls */
 .message-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:4px}.message-actions button,.message-edit button{border:1px solid #cbd5e1;background:white;border-radius:6px;padding:3px 8px;cursor:pointer}.message-edit{display:flex;flex-wrap:wrap;gap:6px}.message-edit input{min-width:120px;flex:1;padding:6px;border:1px solid #cbd5e1;border-radius:6px}
+
+/* Conversation management */
+.conversation-controls{display:flex;gap:6px;padding:0 12px 8px 62px;flex-wrap:wrap}.conversation-controls button{font-size:11px;padding:3px 6px;border:1px solid #d8e1e8;border-radius:6px;background:transparent;cursor:pointer}.conversation-entry>.conversation{width:100%}

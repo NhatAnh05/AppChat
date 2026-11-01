@@ -34,5 +34,12 @@ export function useDemoChats() {
       saveDemo('messages', next); return next;
     });
   }
-  return { conversations, messages, sendMessage, addConversation, changeMessage, deleteMessage };
+  function updateConversation(id: string, changes: Partial<Conversation>) {
+    setConversations(old => { const next = old.map(c => c.id === id ? {...c, ...changes} : c); saveDemo('conversations', next); return next; });
+  }
+  function removeConversation(id: string) {
+    setConversations(old => {const next = old.filter(c => c.id !== id);saveDemo('conversations', next);return next;});
+    setMessages(old => {const next = {...old};delete next[id];saveDemo('messages', next);return next;});
+  }
+  return { conversations, messages, sendMessage, addConversation, changeMessage, deleteMessage, updateConversation, removeConversation };
 }
