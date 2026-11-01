@@ -4,21 +4,24 @@ import Avatar from './Avatar';
 import type { Conversation, Message } from '../data/previewContent';
 
 
-type Props = { chat: Conversation | undefined; onBack: () => void; onDetails: () => void; onOpenCallPreview: () => void; messages: Message[]; onSend: (text: string) => void };
-function MessageBubble({ message, color }: { message: Message; color: string }) {
+type Props = { chat: Conversation | undefined; onBack: () => void; onDetails: () => void; onOpenCallPreview: () => void; messages: Message[]; onSend: (text: string) => void; onEdit: (id: string, text: string) => void; onDelete: (id: string) => void };
+function MessageBubble({ message, color, onEdit, onDelete }: { message: Message; color: string; onEdit: (id: string, text: string) => void; onDelete: (id: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(message.text ?? "");
   return <div className={`message-line ${message.fromMe ? 'mine' : 'theirs'}`}>
     {!message.fromMe && <Avatar initial="L" color={color} size={28} className="message-avatar" />}
     <div className="message-body">
       {message.replyTo && <div className="reply-snippet"><span>Đã trả lời tin nhắn</span>{message.replyTo}</div>}
       {message.attachment === 'photo' && <div className="photo-sample"><div className="photo-sample-graphic"><span className="photo-sample-window"><span/><span/><span/></span><span className="photo-sample-illustration"><i/><i/><i/></span></div><span className="photo-sample-caption"><ImageIcon size={14}/> Bản xem trước thiết kế</span></div>}
       {message.attachment === 'file' && <div className="file-sample"><span className="file-symbol"><FileText size={23}/></span><span className="file-description"><strong>{message.fileName}</strong><small>{message.fileDetail}</small></span><span className="file-menu"><MoreHorizontal size={17}/></span></div>}
-      {message.text && <div className="bubble">{message.text}</div>}
+      {editing ? <form className="message-edit" onSubmit={e => { e.preventDefault(); if (draft.trim()) { onEdit(message.id, draft); setEditing(false); } }}><input aria-label="Sửa tin nhắn" value={draft} onChange={e => setDraft(e.target.value)}/><button type="submit">Lưu</button><button type="button" onClick={() => setEditing(false)}>Hủy</button></form> : message.text && <div className="bubble">{message.text}{message.edited && <small> · đã sửa</small>}</div>}
+      {message.fromMe && message.text && <div className="message-actions"><button type="button" onClick={() => {setDraft(message.text ?? '');setEditing(true);}}>Sửa</button><button type="button" onClick={() => {if (window.confirm('Xóa tin nhắn này?')) onDelete(message.id);}}>Xóa</button></div>}
       {message.emoji && <span className="reaction-preview">{message.emoji}</span>}
       <div className="message-meta"><time>{message.time}</time>{message.fromMe && (message.seen ? <CheckCheck size={14} className="seen-icon"/> : <CheckCheck size={14}/>)}</div>
     </div>
   </div>;
 }
-export default function ChatPanel({ chat, onBack, onDetails, onOpenCallPreview, messages, onSend }: Props) {
+export default function ChatPanel({ chat, onBack, onDetails, onOpenCallPreview, messages, onSend, onEdit, onDelete }: Props) {
   const [text, setText] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [query, setQuery] = useState('');
@@ -44,7 +47,7 @@ export default function ChatPanel({ chat, onBack, onDetails, onOpenCallPreview, 
       <div className="timeline"><span>Hôm nay</span></div>
       <div className="message-flow">{messages.map((message, index) => <div key={message.id} className={query && (message.text ?? message.fileName ?? '').toLocaleLowerCase('vi').includes(query.toLocaleLowerCase('vi')) ? 'search-hit' : ''}>
         {message.day && index !== 0 && <div className="timeline"><span>{message.day}</span></div>}
-        <MessageBubble message={message} color={chat.color}/>
+        <MessageBubble message={message} color={chat.color} onEdit={onEdit} onDelete={onDelete}/>
       </div>)}</div><div ref={endRef}/>
     </section>
     <div className="composer" aria-label="Khung soạn tin nhắn minh họa">
