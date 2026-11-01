@@ -65,3 +65,6 @@
   place-items: center;
   align-self: center;
 }
+
+/* Message lifecycle controls */
+.message-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:4px}.message-actions button,.message-edit button{border:1px solid #cbd5e1;background:white;border-radius:6px;padding:3px 8px;cursor:pointer}.message-edit{display:flex;flex-wrap:wrap;gap:6px}.message-edit input{min-width:120px;flex:1;padding:6px;border:1px solid #cbd5e1;border-radius:6px}

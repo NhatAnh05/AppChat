@@ -1,4 +1,4 @@
-import { Archive, ContactRound, MessageCircleMore, Settings, UsersRound, Phone, FolderArchive, ChevronDown } from 'lucide-react';
+import { ContactRound, MessageCircleMore, Settings, UsersRound, Phone, FolderArchive, ChevronDown } from 'lucide-react';
 import Avatar from './Avatar';
 export type Section = 'chats' | 'contacts' | 'archive';
 type Props = { active: Section; onChange: (section: Section) => void; onSettings: () => void; onGroups: () => void; onCalls: () => void; accountName: string };

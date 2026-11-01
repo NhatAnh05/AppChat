@@ -20,5 +20,19 @@ export function useDemoChats() {
     setConversations(old => { const next = [chat,...old]; saveDemo('conversations', next); return next; });
     return id;
   }
-  return { conversations, messages, sendMessage, addConversation };
+  function changeMessage(chatId: string, messageId: string, text: string) {
+    const clean = text.trim();
+    if (!clean) return;
+    setMessages(old => {
+      const next = { ...old, [chatId]: (old[chatId] ?? []).map(m => m.id === messageId && m.fromMe ? { ...m, text: clean, edited: true } : m) };
+      saveDemo('messages', next); return next;
+    });
+  }
+  function deleteMessage(chatId: string, messageId: string) {
+    setMessages(old => {
+      const next = { ...old, [chatId]: (old[chatId] ?? []).filter(m => m.id !== messageId || !m.fromMe) };
+      saveDemo('messages', next); return next;
+    });
+  }
+  return { conversations, messages, sendMessage, addConversation, changeMessage, deleteMessage };
 }

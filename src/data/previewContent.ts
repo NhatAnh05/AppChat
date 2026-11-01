@@ -28,6 +28,7 @@ export type Message = {
   replyTo?: string;
   emoji?: string;
   seen?: boolean;
+  edited?: boolean;
 };
 export const conversations: Conversation[] = [
   { id: 'linh', name: 'Nguyễn Thảo Linh', initial: 'L', color: '#9b728b', preview: 'Ừ vậy chốt chiều mai nha', time: '10:42', unread: 2, pinned: true, presence: 'online' },

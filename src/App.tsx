@@ -18,7 +18,7 @@ export default function App() {
   const [account, setAccount] = useState<DemoAccount | null>(() => getDemoSession());
   const [profileOpen, setProfileOpen] = useState(false);
   const [notifications, setNotifications] = useState(() => readDemo('notifications', true));
-  const { conversations, messages, sendMessage, addConversation } = useDemoChats();
+  const { conversations, messages, sendMessage, addConversation, changeMessage, deleteMessage } = useDemoChats();
   const [section, setSection] = useState<Section>('chats');
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
@@ -34,7 +34,7 @@ export default function App() {
   return <div className={`app-shell ${mobileChat ? 'is-mobile-chat' : ''} ${details ? 'details-open' : ''}`}>
     <Rail active={section} onChange={selectSection} onSettings={() => setModal('settings')} onGroups={() => {setSection('chats');setFilter('groups');setDetails(false);}} onCalls={() => setModal('call')} accountName={account.name}/>
     <Sidebar conversations={conversations} section={section} filter={filter} onFilter={setFilter} search={search} onSearch={setSearch} selected={selected} onSelect={setSelected} onNewChat={() => setModal('new')} onShowChat={() => setMobileChat(true)}/>
-    <ChatPanel key={selected} messages={messages[selected] ?? []} onSend={value => sendMessage(selected, value)} chat={section === 'contacts' ? undefined : chat} onBack={() => setMobileChat(false)} onDetails={() => setDetails(value => !value)} onOpenCallPreview={() => setModal('call')}/>
+    <ChatPanel key={selected} messages={messages[selected] ?? []} onSend={value => sendMessage(selected, value)} onEdit={(id, text) => changeMessage(selected, id, text)} onDelete={id => deleteMessage(selected, id)} chat={section === 'contacts' ? undefined : chat} onBack={() => setMobileChat(false)} onDetails={() => setDetails(value => !value)} onOpenCallPreview={() => setModal('call')}/>
     {details && chat && section !== 'contacts' && <DetailsPanel key={chat.id} chat={chat} onClose={() => setDetails(false)}/>}
     {modal && <div className="modal-backdrop" onMouseDown={(e) => {if (e.target === e.currentTarget) setModal(null);}}><div className="modal" role="dialog" aria-modal="true" aria-label={modal === 'new' ? 'Tin nhắn mới' : modal === 'settings' ? 'Cài đặt giao diện' : 'Gọi thoại và video'}>
       <div className="modal-heading"><div><span className="eyebrow">LYRACHAT / GIAO DIỆN</span><h2>{modal === 'new' ? 'Tin nhắn mới' : modal === 'settings' ? 'Cài đặt' : 'Giao diện cuộc gọi'}</h2></div><button className="icon-button" type="button" aria-label="Đóng hộp thoại" onClick={() => setModal(null)}><X size={20}/></button></div>
