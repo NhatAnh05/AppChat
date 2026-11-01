@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, CheckCheck, ChevronDown, FileText, Image as ImageIcon, Info, LockKeyhole, MoreHorizontal, Paperclip, Phone, Plus, Search, SendHorizontal, Smile, Video, X } from 'lucide-react';
 import Avatar from './Avatar';
 import type { Conversation, Message } from '../data/previewContent';
-import { sampleMessages } from '../data/previewContent';
 
-type Props = { chat: Conversation | undefined; onBack: () => void; onDetails: () => void; onOpenCallPreview: () => void };
+
+type Props = { chat: Conversation | undefined; onBack: () => void; onDetails: () => void; onOpenCallPreview: () => void; messages: Message[]; onSend: (text: string) => void };
 function MessageBubble({ message, color }: { message: Message; color: string }) {
   return <div className={`message-line ${message.fromMe ? 'mine' : 'theirs'}`}>
     {!message.fromMe && <Avatar initial="L" color={color} size={28} className="message-avatar" />}
@@ -18,7 +18,7 @@ function MessageBubble({ message, color }: { message: Message; color: string }) 
     </div>
   </div>;
 }
-export default function ChatPanel({ chat, onBack, onDetails, onOpenCallPreview }: Props) {
+export default function ChatPanel({ chat, onBack, onDetails, onOpenCallPreview, messages, onSend }: Props) {
   const [text, setText] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [query, setQuery] = useState('');
@@ -26,11 +26,9 @@ export default function ChatPanel({ chat, onBack, onDetails, onOpenCallPreview }
   const [menu, setMenu] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {setText('');setQuery('');setShowSearch(false);setShowEmoji(false);setMenu(false);}, [chat?.id]);
-  useEffect(() => {endRef.current?.scrollIntoView({ block: 'end', behavior: 'instant' });}, [chat?.id]);
+  useEffect(() => {endRef.current?.scrollIntoView({ block: 'end', behavior: 'instant' });}, [chat?.id, messages.length]);
   if (!chat) return <main className="chat-main"><div className="welcome-empty"><div className="welcome-glyph"><SendHorizontal size={30}/></div><h2>Tin nhắn của bạn</h2><p>Chọn một cuộc trò chuyện ở bên trái để xem bản thiết kế cửa sổ nhắn tin.</p><span className="ui-only-hint"><LockKeyhole size={14}/> Đây là nguyên mẫu giao diện, chưa kết nối API.</span></div></main>;
-  const messages = sampleMessages[chat.id] ?? [
-    { id: 'placeholder', fromMe: false, text: 'Đây là nội dung mẫu để trình bày giao diện hội thoại.', time: '10:20', day: 'Hôm nay' },
-  ];
+  const send = () => { if (!text.trim()) return; onSend(text); setText(''); };
   const conversationMatches = messages.filter(message => (message.text ?? message.fileName ?? '').toLocaleLowerCase('vi').includes(query.toLocaleLowerCase('vi')));
   return <main className="chat-main" aria-label="Nội dung hội thoại">
     <header className="chat-header">
@@ -51,10 +49,10 @@ export default function ChatPanel({ chat, onBack, onDetails, onOpenCallPreview }
     </section>
     <div className="composer" aria-label="Khung soạn tin nhắn minh họa">
       <div className="composer-tools"><button type="button" title="Thêm nội dung" aria-label="Thêm nội dung" className="composer-add" onClick={() => setShowEmoji(value => !value)}><Plus size={21}/></button><button type="button" title="Đính kèm (giao diện)" aria-label="Đính kèm (giao diện)"><Paperclip size={20}/></button><button type="button" title="Chọn biểu tượng cảm xúc" aria-label="Biểu tượng cảm xúc" className="emoji-trigger" onClick={() => setShowEmoji(value => !value)}><Smile size={20}/></button></div>
-      <div className="compose-field"><textarea rows={1} aria-label="Soạn tin nhắn" placeholder="Nhập tin nhắn..." value={text} onChange={event => setText(event.target.value)}/><span className="compose-note">Chế độ thiết kế · không gửi tin nhắn</span></div>
-      <button type="button" className="send-button" title="Nút gửi (chưa kết nối chức năng)" aria-label="Gửi (chỉ là giao diện)" disabled={!text.trim()}><SendHorizontal size={19}/></button>
+      <div className="compose-field"><textarea rows={1} aria-label="Soạn tin nhắn" placeholder="Nhập tin nhắn..." value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }}/><span className="compose-note">Enter để gửi · Shift + Enter xuống dòng</span></div>
+      <button type="button" className="send-button" title="Gửi tin nhắn demo" aria-label="Gửi tin nhắn demo" onClick={send} disabled={!text.trim()}><SendHorizontal size={19}/></button>
       {showEmoji && <div className="emoji-sample"><div className="popover-heading">Biểu tượng cảm xúc <button type="button" aria-label="Đóng emoji" onClick={() => setShowEmoji(false)}><X size={15}/></button></div><div className="emoji-grid">{['😀','🙂','😍','😅','😂','👍','❤️','✨','🎉','🙏','💙','🔥'].map(emoji => <button type="button" key={emoji} onClick={() => {setText(t => t + emoji);setShowEmoji(false);}}>{emoji}</button>)}</div><div className="emoji-caption">Bảng emoji minh họa</div></div>}
     </div>
-    <div className="composer-bottom"><LockKeyhole size={12}/> Bản dựng giao diện — không lưu hoặc gửi dữ liệu <ChevronDown size={13}/></div>
+    <div className="composer-bottom"><LockKeyhole size={12}/> Tin nhắn chỉ lưu cục bộ trên trình duyệt · chưa gửi cho người khác <ChevronDown size={13}/></div>
   </main>;
 }

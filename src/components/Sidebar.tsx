@@ -2,11 +2,12 @@ import { Archive, BellOff, ChevronDown, MessageSquarePlus, MoreHorizontal, Pin, 
 import { useMemo } from 'react';
 import Avatar from './Avatar';
 import type { Conversation } from '../data/previewContent';
-import { conversations, contacts } from '../data/previewContent';
+import { contacts } from '../data/previewContent';
 import type { Section } from './Rail';
 export type Filter = 'all' | 'unread' | 'groups';
 type Props = {
   section: Section;
+  conversations: Conversation[];
   selected: string;
   filter: Filter;
   search: string;
@@ -26,13 +27,13 @@ function ChatRow({ chat, selected, onClick }: { chat: Conversation; selected: bo
     <span className="conversation-end"><span className={`conversation-time ${chat.unread ? 'emphasis' : ''}`}>{chat.time}</span>{chat.unread ? <span className="unread-bubble">{chat.unread}</span> : chat.muted ? <BellOff size={13}/> : chat.pinned ? <Pin size={13}/> : null}</span>
   </button>;
 }
-export default function Sidebar({ section, selected, filter, search, onSelect, onFilter, onSearch, onNewChat, onShowChat }: Props) {
+export default function Sidebar({ conversations, section, selected, filter, search, onSelect, onFilter, onSearch, onNewChat, onShowChat }: Props) {
   const visible = useMemo(() => conversations.filter(chat => {
     if (section === 'archive' ? !chat.archived : chat.archived) return false;
     if (section === 'chats' && filter === 'unread' && !chat.unread) return false;
     if (section === 'chats' && filter === 'groups' && !chat.group) return false;
     return `${chat.name} ${chat.preview}`.toLocaleLowerCase('vi').includes(search.toLocaleLowerCase('vi'));
-  }), [section, filter, search]);
+  }), [conversations, section, filter, search]);
   return <aside className="sidebar" aria-label="Danh sách hội thoại">
     <div className="sidebar-header"><div><span className="eyebrow">APPCHAT / MESSENGER</span><h1>{section === 'chats' ? 'Tin nhắn' : section === 'archive' ? 'Đã lưu trữ' : 'Danh bạ'}</h1></div><div className="sidebar-heading-tools"><button type="button" title="Tùy chọn hiển thị" aria-label="Tùy chọn hiển thị"><MoreHorizontal size={21}/></button><button type="button" title="Tin nhắn mới" aria-label="Tin nhắn mới" className="new-chat-button" onClick={onNewChat}><MessageSquarePlus size={20}/></button></div></div>
     <div className="search-box"><Search size={18}/><input aria-label="Tìm kiếm" placeholder={section === 'contacts' ? 'Tìm trong danh bạ' : 'Tìm kiếm cuộc trò chuyện'} value={search} onChange={event => onSearch(event.target.value)}/>{search && <button type="button" aria-label="Xóa tìm kiếm" onClick={() => onSearch('')}><X size={16}/></button>}</div>
