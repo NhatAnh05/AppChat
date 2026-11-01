@@ -74,3 +74,242 @@
 
 /* Group administration */
 .group-form{display:grid;gap:12px}.group-form>label{display:grid;gap:6px}.group-form input[type=text],.group-form>label input{padding:10px;border:1px solid #cbd5e1;border-radius:8px}.group-member-list{max-height:220px;overflow:auto;display:grid;gap:8px}.group-member-list label{display:flex;align-items:center;gap:8px}.group-form>button{border:0;border-radius:8px;padding:10px;background:#416f9b;color:white;cursor:pointer}.group-form>button:disabled{opacity:.5}
+
+/* UI stabilization: keep one conversation viewport usable at desktop widths. */
+.app-shell > .chat-main { flex: 1 1 0; min-width: 0; width: auto; overflow: hidden; }
+.chat-header { min-width: 0; }
+.chat-header > .chat-title { flex: 1 1 auto; min-width: 0; }
+.chat-header-tools { flex: 0 0 auto; white-space: nowrap; }
+.chat-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.message-scroll { min-width: 0; }
+.message-line { min-width: 0; }
+.composer { min-width: 0; }
+.conversation-entry { position: relative; }
+.conversation-controls { padding: 0 12px 8px 62px; }
+.message-actions button:focus-visible,.conversation-controls button:focus-visible { outline: 2px solid #245b4e; outline-offset: 2px; }
+@media (min-width: 1031px) and (max-width: 1400px) {
+  .app-rail { width: 175px; flex-basis: 175px; }
+  .sidebar { width: 300px; flex-basis: 300px; }
+  .details { width: 280px; flex-basis: 280px; }
+  .chat-header { padding-inline: 14px; gap: 7px; }
+  .chat-header-tools { gap: 0; }
+  .chat-header-tools .icon-button { width: 32px; height: 36px; flex-basis: 32px; }
+}
+@media (max-width: 760px) {
+  .chat-header { padding-inline: 12px; }
+  .chat-header-tools .icon-button { width: 32px; height: 34px; flex-basis: 32px; }
+}
+
+/* =========================================================
+   LyraChat UX: Messenger-inspired contextual action controls
+   Only changes the presentation of existing local demo features.
+   ========================================================= */
+
+/* Shared popover, portaled to body so scrolling parents cannot clip it. */
+.action-menu-trigger {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff;
+  color: #425b66;
+  box-shadow: 0 1px 4px #234e4620;
+  border: 1px solid #e2ebe9;
+  transition: background .15s, color .15s, opacity .15s;
+}
+.action-menu-trigger:hover,
+.action-menu-trigger.is-open,
+.action-menu-trigger:focus-visible {
+  background: #e5f2ed;
+  color: #205c4e;
+}
+.action-menu-popover {
+  position: fixed;
+  width: 244px;
+  z-index: 120;
+  padding: 7px;
+  background: #fff;
+  border: 1px solid #e3eae8;
+  border-radius: 14px;
+  box-shadow: 0 16px 40px #193d3240, 0 2px 7px #193d3210;
+  animation: context-appear .13s ease-out;
+}
+@keyframes context-appear {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.action-menu-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 43px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  border-radius: 9px;
+  color: #293f46;
+}
+.action-menu-option:hover,
+.action-menu-option:focus-visible { background: #ecf5f1; }
+.action-menu-option-icon { width: 20px; display: grid; place-items: center; color: #536a72; }
+.action-menu-option.with-divider { border-top: 1px solid #eef1f1; border-radius: 0 0 9px 9px; margin-top: 4px; padding-top: 13px; }
+.action-menu-option.is-danger { color: #c04444; }
+.action-menu-option.is-danger .action-menu-option-icon { color: #c04444; }
+.action-menu-option.is-danger:hover { background: #fff0ef; }
+
+/* Sidebar: a single ellipsis instead of three permanent buttons. */
+.conversation-entry { position: relative; border-radius: 15px; }
+.conversation-entry > .conversation { width: 100%; padding-right: 44px; }
+.conversation-more-button {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  opacity: 0;
+  visibility: hidden;
+  z-index: 2;
+}
+.conversation-entry:hover .conversation-more-button,
+.conversation-entry:focus-within .conversation-more-button,
+.conversation-more-button.is-open {
+  opacity: 1;
+  visibility: visible;
+}
+.conversation-entry .conversation-end { margin-right: 0; }
+.conversation-entry:hover .conversation-end,
+.conversation-entry:focus-within .conversation-end { opacity: .3; }
+.sidebar-help { color: #627e79; }
+/* Remove the old full-width action bar when older CSS is present. */
+.conversation-controls { display: none !important; }
+
+/* Message actions are a compact floating toolbar beside OWN message. */
+.message-line.mine .message-body { position: relative; }
+.message-quick-actions {
+  position: absolute;
+  right: 100%;
+  padding-right: 6px;
+  top: 1px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .15s;
+}
+.message-line.mine:hover .message-quick-actions,
+.message-line.mine:focus-within .message-quick-actions,
+.message-quick-actions:has(.is-open) {
+  opacity: 1;
+  visibility: visible;
+}
+.message-more-button { width: 32px; height: 32px; min-width: 32px; }
+.message-actions { display: none !important; }
+.message-edit {
+  width: min(370px, 70vw);
+  max-width: 100%;
+  background: #fff;
+  padding: 13px;
+  border: 1px solid #dbe8e3;
+  border-radius: 14px;
+  box-shadow: 0 8px 28px #16392d18;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 9px;
+}
+.message-edit label { font-weight: 700; font-size: 12px; color: #204b3e; }
+.message-edit textarea {
+  width: 100%;
+  min-height: 65px;
+  max-height: 190px;
+  padding: 10px 12px;
+  resize: vertical;
+  border: 1px solid #d8e6e1;
+  border-radius: 10px;
+  background: #f7faf9;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.message-edit-footer { display: flex; justify-content: flex-end; gap: 8px; }
+.message-edit .message-edit-footer button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.message-edit .edit-cancel { background: #edf2f0; color: #526861; }
+.message-edit .edit-save { background: #245b4e; color: #fff; }
+.message-edit .edit-save:disabled { opacity: .4; }
+.chat-header-more-button { box-shadow: none; border: 0; background: transparent; width: 38px; height: 38px; }
+.chat-header-tools .action-menu-trigger { flex: 0 0 38px; }
+
+/* Group management: visible member list with clear edit/add actions. */
+.group-detail-members { display: flex; flex-direction: column; gap: 6px; }
+.group-detail-member { display: flex; align-items: center; gap: 10px; padding: 7px 2px; }
+.group-detail-member > span:last-child { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.group-detail-member strong { font-size: 12px; color: #254038; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-detail-member small { color: #899c99; font-size: 10px; }
+.manage-group-button {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 42px;
+  margin-top: 5px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: #eaf5ef;
+  color: #215e4d;
+  font-weight: 700;
+  font-size: 11.5px;
+  text-align: left;
+}
+.manage-group-button:hover { background: #d6eae0; }
+.manage-group-button.is-secondary { background: #f3f6f5; color: #486158; }
+.manage-group-button.is-secondary:hover { background: #e6eeea; }
+.group-form { display: flex; flex-direction: column; gap: 14px; }
+.group-form-lead { font-size: 12px; color: #7b8f88; line-height: 1.6; }
+.group-form .group-name-field { display: flex; flex-direction: column; gap: 8px; font-size: 12px; font-weight: 700; color: #344b43; }
+.group-form .group-name-field input { padding: 12px 13px; border: 1px solid #d8e5df; border-radius: 11px; font-size: 13px; }
+.group-form .group-name-field input:focus { border-color: #397a64; box-shadow: 0 0 0 3px #397a6420; }
+.group-member-heading { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+.group-member-heading strong { color: #2a433b; }
+.group-member-heading span { color: #2c7560; font-size: 11px; font-weight: 700; }
+.group-contact-search { display: flex; align-items: center; gap: 8px; border-radius: 11px; background: #f2f6f4; color: #789188; padding: 0 12px; }
+.group-contact-search input { flex: 1; min-width: 0; background: transparent; height: 40px; font-size: 12px; }
+.group-selected-members { display: flex; flex-wrap: wrap; gap: 6px; }
+.group-selected-members button { display: flex; align-items: center; gap: 7px; padding: 7px 9px; border-radius: 20px; background: #e1f1e9; color: #28624e; font-size: 10px; font-weight: 700; }
+.group-selected-members button:hover { background: #cce7d9; }
+.group-member-list { display: flex; flex-direction: column; gap: 3px; max-height: 240px; overflow-y: auto; padding-right: 3px; }
+.group-member-list .group-member-option { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 10px; cursor: pointer; }
+.group-member-list .group-member-option:hover { background: #f0f6f3; }
+.group-member-name { flex: 1; font-size: 12px; font-weight: 600; }
+.group-member-option input[type="checkbox"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.group-checkmark { width: 21px; height: 21px; display: grid; place-items: center; border: 1.5px solid #c9dbd4; border-radius: 50%; color: transparent; }
+.group-member-option input:checked + .group-checkmark { background: #276451; border-color: #276451; color: #fff; }
+.group-member-option input:focus-visible + .group-checkmark { outline: 2px solid #286c59; outline-offset: 3px; }
+.group-no-results { color: #82938c; font-size: 11px; text-align: center; padding: 14px; }
+.group-form-footer { display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid #e7eeeb; padding-top: 15px; }
+.group-form-footer button { padding: 10px 16px; border-radius: 10px; font-size: 12px; font-weight: 700; }
+.group-form-footer .group-cancel { background: #eff3f1; color: #536a61; }
+.group-form-footer .group-submit { background: #245b4e; color: #fff; }
+.group-form-footer .group-submit:hover { background: #174c3f; }
+
+@media (hover: none) {
+  .conversation-more-button, .message-quick-actions { opacity: 1; visibility: visible; }
+  .conversation-end { opacity: .4; }
+}
+@media (max-width: 760px) {
+  .chat-header-tools .chat-header-more-button { display: inline-grid; width: 32px; height: 34px; flex-basis: 32px; }
+  .conversation-more-button { right: 8px; }
+  .message-edit { width: min(310px, 75vw); }
+  .group-form-footer { position: sticky; bottom: -1px; background: #fff; }
+}
