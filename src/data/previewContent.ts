@@ -15,6 +15,7 @@ export type Conversation = {
   archived?: boolean;
   presence?: Presence;
   members?: string;
+  memberNames?: string[];
 };
 export type Message = {
   id: string;

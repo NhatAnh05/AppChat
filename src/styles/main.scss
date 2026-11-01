@@ -71,3 +71,6 @@
 
 /* Conversation management */
 .conversation-controls{display:flex;gap:6px;padding:0 12px 8px 62px;flex-wrap:wrap}.conversation-controls button{font-size:11px;padding:3px 6px;border:1px solid #d8e1e8;border-radius:6px;background:transparent;cursor:pointer}.conversation-entry>.conversation{width:100%}
+
+/* Group administration */
+.group-form{display:grid;gap:12px}.group-form>label{display:grid;gap:6px}.group-form input[type=text],.group-form>label input{padding:10px;border:1px solid #cbd5e1;border-radius:8px}.group-member-list{max-height:220px;overflow:auto;display:grid;gap:8px}.group-member-list label{display:flex;align-items:center;gap:8px}.group-form>button{border:0;border-radius:8px;padding:10px;background:#416f9b;color:white;cursor:pointer}.group-form>button:disabled{opacity:.5}
