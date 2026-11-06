@@ -1,0 +1,11 @@
+services:
+  appchat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_CHAT_WS_URL: ${VITE_CHAT_WS_URL:-wss://chat.longapp.io.vn/chat/chat}
+    container_name: appchat-frontend
+    ports:
+      - "8088:80"
+    restart: unless-stopped
