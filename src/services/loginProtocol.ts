@@ -21,7 +21,6 @@ export function makeLoginRequest(username: string, password: string): LoginReque
   };
 }
 
-/** Chỉ đọc frame LOGIN. Mã phiên được giữ nguyên, không tự tạo mã thay thế. */
 export function readLoginResponse(raw: string): LoginResponse | null {
   let value: unknown;
   try {

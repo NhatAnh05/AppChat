@@ -109,7 +109,6 @@ export function loginAccount(
           options.onDisconnected?.();
         }
       };
-      // Socket được giữ mở; các sự kiện chat sẽ được quản lý ở giai đoạn sau.
       resolve({ username: input.username, reLoginCode: code });
     };
 
