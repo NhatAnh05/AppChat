@@ -11,50 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   </head>
   <body>
-    <div id="root">
-      <div id="lyra-loading" style="font-family:Arial,sans-serif;max-width:650px;margin:12vh auto;padding:28px;color:#173c35;background:#f4faf8;border-radius:16px">
-        <h2>Đang khởi động LyraChat…</h2>
-        <p>Nếu nội dung này không biến mất, hãy kiểm tra Terminal và nhấn F12 → Console.</p>
-      </div>
-    </div>
-    <script>
-      // Chẩn đoán lỗi xảy ra trước khi React khởi tạo (import, Vite, JS runtime).
-      (function () {
-        var hasShownError = false;
-        function showError(detail) {
-          if (hasShownError) return;
-          hasShownError = true;
-          var root = document.getElementById('root');
-          if (!root || !document.getElementById('lyra-loading')) return;
-          root.textContent = '';
-          var panel = document.createElement('div');
-          panel.style.cssText = 'max-width:700px;margin:9vh auto;padding:28px;border-radius:16px;background:#fff;border:1px solid #d5e7e1;box-shadow:0 12px 40px #173c3520;font-family:Arial,sans-serif;color:#173c35';
-          var heading = document.createElement('h2');
-          heading.textContent = 'LyraChat không thể khởi động';
-          var instruction = document.createElement('p');
-          instruction.textContent = 'Hãy sao chép thông tin bên dưới và gửi để xác định chính xác lỗi. Kiểm tra thêm F12 → Console.';
-          var error = document.createElement('pre');
-          error.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;background:#f1f5f4;padding:15px;border-radius:8px;color:#842d2d';
-          error.textContent = detail;
-          var reload = document.createElement('button');
-          reload.textContent = 'Tải lại trang';
-          reload.style.cssText = 'border:0;border-radius:8px;padding:12px 18px;color:#fff;background:#246b57;cursor:pointer';
-          reload.onclick = function () { location.reload(); };
-          panel.append(heading, instruction, error, reload);
-          root.appendChild(panel);
-        }
-        window.addEventListener('error', function (event) {
-          var message = event.error && event.error.stack ? event.error.stack : event.message;
-          if (!message && event.target && event.target.src) message = 'Không tải được: ' + event.target.src;
-          if (message) showError(String(message));
-        }, true);
-        window.addEventListener('unhandledrejection', function (event) {
-          var reason = event.reason;
-          showError(String(reason && (reason.stack || reason.message) || reason));
-        });
-        // Không che lỗi bằng timeout: giữ hướng dẫn nếu bundle chưa khởi chạy.
-      })();
-    </script>
+    <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:register": "node --experimental-strip-types --test tests/registerProtocol.test.mjs",
+    "test:login": "node --experimental-strip-types --test tests/loginProtocol.test.mjs",
+    "test:api": "node --experimental-strip-types --test tests/*.test.mjs",
+    "test:chat": "node --experimental-strip-types --test tests/chatProtocol.test.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

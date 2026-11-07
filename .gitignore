@@ -2,3 +2,5 @@
 dist/
 .env
 .env.local
+local-server/chat-data.json
+local-server/chat-data.json.tmp

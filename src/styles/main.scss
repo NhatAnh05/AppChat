@@ -75,15 +75,247 @@
 /* Group administration */
 .group-form{display:grid;gap:12px}.group-form>label{display:grid;gap:6px}.group-form input[type=text],.group-form>label input{padding:10px;border:1px solid #cbd5e1;border-radius:8px}.group-member-list{max-height:220px;overflow:auto;display:grid;gap:8px}.group-member-list label{display:flex;align-items:center;gap:8px}.group-form>button{border:0;border-radius:8px;padding:10px;background:#416f9b;color:white;cursor:pointer}.group-form>button:disabled{opacity:.5}
 
+/* UI stabilization: keep one conversation viewport usable at desktop widths. */
+.app-shell > .chat-main { flex: 1 1 0; min-width: 0; width: auto; overflow: hidden; }
+.chat-header { min-width: 0; }
+.chat-header > .chat-title { flex: 1 1 auto; min-width: 0; }
+.chat-header-tools { flex: 0 0 auto; white-space: nowrap; }
+.chat-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.message-scroll { min-width: 0; }
+.message-line { min-width: 0; }
+.composer { min-width: 0; }
+.conversation-entry { position: relative; }
+.conversation-controls { padding: 0 12px 8px 62px; }
+.message-actions button:focus-visible,.conversation-controls button:focus-visible { outline: 2px solid #245b4e; outline-offset: 2px; }
+@media (min-width: 1031px) and (max-width: 1400px) {
+  .app-rail { width: 175px; flex-basis: 175px; }
+  .sidebar { width: 300px; flex-basis: 300px; }
+  .details { width: 280px; flex-basis: 280px; }
+  .chat-header { padding-inline: 14px; gap: 7px; }
+  .chat-header-tools { gap: 0; }
+  .chat-header-tools .icon-button { width: 32px; height: 36px; flex-basis: 32px; }
+}
+@media (max-width: 760px) {
+  .chat-header { padding-inline: 12px; }
+  .chat-header-tools .icon-button { width: 32px; height: 34px; flex-basis: 32px; }
+}
 
-/* Trang cài đặt LyraChat - đồng bộ từ bản thiết kế */
-.ly-settings-page{flex:1;min-width:0;height:100%;overflow:auto;padding:24px 28px 34px;background:radial-gradient(ellipse at 61% 14%,#f7fafb 0,#f4f7fa 55%,#f6f8fa 100%);color:#132b38}
-.ly-settings-title{margin:0 4px 24px}.ly-settings-title h1{font-size:30px;line-height:1.2;font-weight:800;letter-spacing:-.8px}.ly-settings-title p{font-size:14px;color:#667589;margin-top:7px}
-.ly-settings-grid{display:grid;grid-template-columns:minmax(275px,320px) minmax(0,1fr);gap:17px;align-items:start;max-width:1480px;margin:auto}.ly-settings-menu,.ly-settings-card,.ly-settings-hero{background:#fff;border:1px solid #e4eaf0;border-radius:15px;box-shadow:0 3px 14px #28465809}
-.ly-settings-menu{padding:16px 11px;min-height:calc(100dvh - 160px)}.ly-settings-menu-item{width:100%;min-height:72px;padding:10px 11px;display:flex;align-items:center;text-align:left;gap:13px;border-radius:12px;color:#18313f}.ly-settings-menu-item:hover{background:#f2f8f6}.ly-settings-menu-item.selected{background:linear-gradient(110deg,#eaf7f3,#e3f1ed)}.ly-settings-menu-icon{width:39px;height:39px;display:grid;place-items:center;flex-shrink:0;color:#244858;border-radius:11px}.ly-settings-menu-item.selected .ly-settings-menu-icon{background:#d6f0e6;color:#16775d}.ly-settings-menu-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}.ly-settings-menu-copy strong{font-size:15px}.ly-settings-menu-copy small{font-size:12px;color:#6b7e8c;line-height:1.35}.ly-settings-menu-item>svg:last-child{flex-shrink:0}.ly-settings-menu-item.logout{margin-top:24px;border-top:1px solid #e5ebee;border-radius:0;padding-top:20px;color:#da2b2b}.ly-settings-menu-item.logout .ly-settings-menu-icon{color:#da2b2b}
-.ly-settings-content{display:flex;flex-direction:column;gap:16px;min-width:0}.ly-settings-hero{min-height:160px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:22px 26px;overflow:hidden;position:relative;background:linear-gradient(145deg,#fff 0%,#fdfefe 46%,#e4f4ef 100%)}.ly-settings-hero::before,.ly-settings-hero::after{content:'';position:absolute;pointer-events:none;width:390px;height:190px;background:#d3eee64d;right:-48px;bottom:-130px;border-radius:55% 50% 0 0;transform:rotate(-18deg)}.ly-settings-hero::after{right:10%;bottom:-160px;background:#c6e8df40;transform:rotate(24deg)}.ly-settings-hero-inner{z-index:1;display:flex;align-items:center;gap:21px;min-width:0}.ly-settings-hero-inner .avatar{border:4px solid #fff;box-shadow:0 3px 16px #1e4b3b12}.ly-settings-hero-user{min-width:0}.ly-settings-hero-user h2{font-size:21px;font-weight:800;letter-spacing:-.5px;overflow-wrap:anywhere}.ly-settings-hero-user p{font-size:13px;color:#68798a;margin:9px 0;display:flex;align-items:center;gap:8px}.ly-settings-hero-user>span{font-size:13px;color:#7a899a;overflow-wrap:anywhere}.ly-online-dot{background:#08bf87;width:11px;height:11px;border-radius:50%;display:inline-block}.ly-online-dot.offline{background:#9ba7af}.ly-edit-profile{border:1px solid #168568;color:#17664f;background:#ffffff9c;border-radius:10px;padding:11px 15px;display:flex;align-items:center;gap:9px;font-size:13px;font-weight:700;z-index:1;flex-shrink:0}.ly-edit-profile:hover{background:#e7f5f0}
-.ly-settings-card{padding:18px 27px}.ly-settings-card h3{font-size:18px;font-weight:800;letter-spacing:-.35px;margin:0 0 9px}.ly-profile-field{display:grid;grid-template-columns:30px minmax(110px,.8fr) minmax(120px,1.35fr) 31px;align-items:center;gap:13px;min-height:44px;border-bottom:1px solid #edf0f3;font-size:13px}.ly-profile-field:last-child{border:0}.ly-profile-field>svg{color:#2e5562}.ly-profile-field strong{font-weight:600}.ly-profile-field>span{color:#334b5c;overflow-wrap:anywhere}.ly-profile-field button{color:#2a5264;display:grid;place-items:center;width:29px;height:29px;border-radius:7px}.ly-profile-field button:hover{background:#e9f5f1}.ly-settings-card .ly-setting-toggle-row{flex:1}.ly-setting-highlight-row{display:flex;align-items:center;gap:14px;padding:7px 0 0}.ly-setting-highlight-icon{background:#e9f7f2;color:#168668;padding:11px;border-radius:14px}.ly-setting-toggle-row{display:flex;align-items:center;gap:16px;justify-content:space-between;padding:13px 0;min-width:0}.ly-setting-toggle-row>div{display:flex;flex-direction:column;gap:5px;min-width:0}.ly-setting-toggle-row strong{font-size:14px}.ly-setting-toggle-row div span{font-size:12.5px;color:#728296;line-height:1.5}.ly-switch{width:53px;height:30px;border-radius:25px;background:#cbd8d7;padding:4px;flex-shrink:0;transition:background .15s}.ly-switch.checked{background:#148668}.ly-switch span{display:block;height:22px;width:22px;background:#fff;border-radius:50%;box-shadow:0 1px 3px #1233;transition:transform .15s}.ly-switch.checked span{transform:translateX(23px)}.ly-settings-quick{display:grid;grid-template-columns:1fr 1fr}.ly-settings-quick button{display:flex;align-items:center;gap:13px;padding:10px 10px 10px 0;text-align:left;min-width:0}.ly-settings-quick button+button{border-left:1px solid #e7ecef;padding-left:20px}.ly-settings-quick button>span:first-child{background:#eaf8f3;color:#17836c;padding:12px;border-radius:13px;display:grid;place-items:center}.ly-settings-quick button>span:nth-child(2){display:flex;flex:1;flex-direction:column;gap:6px;min-width:0}.ly-settings-quick button strong{font-size:13.5px}.ly-settings-quick button small{font-size:12px;color:#76899a;line-height:1.35}.ly-settings-quick button>svg{width:18px;flex-shrink:0}.ly-settings-quick button:hover strong{color:#168367}
-.ly-tab-card{min-height:310px;padding:26px 30px}.ly-tab-intro{font-size:13px;color:#6a7d8d;margin-bottom:18px;line-height:1.6}.ly-tab-card>.ly-setting-toggle-row{border-bottom:1px solid #edf1f2}.ly-tab-card>.ly-setting-toggle-row:last-child{border-bottom:0}.ly-settings-note{background:#f2f7f7;border-radius:10px;padding:12px 14px;color:#65808a;font-size:12px;line-height:1.5;display:flex;gap:8px;align-items:center;margin-top:20px}.ly-settings-note svg{flex-shrink:0}.ly-form-line{display:flex;flex-direction:column;gap:9px;font-size:13px;font-weight:600}.ly-form-line select{max-width:400px;padding:12px;border:1px solid #dbe5e6;border-radius:9px;background:#fff}.ly-unavailable{min-height:180px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:11px;text-align:center;color:#637a86}.ly-unavailable strong{color:#1d3742}.ly-unavailable span{max-width:400px;font-size:12px;line-height:1.6}.ly-settings-feedback{display:flex;gap:9px;align-items:center;padding:12px 14px;background:#eaf8f2;border:1px solid #c9ebdb;border-radius:10px;color:#16684d;font-size:12px}.ly-settings-feedback button{margin-left:auto}
-.ly-edit-dialog{background:white;border-radius:16px;padding:24px;width:min(650px,calc(100vw - 30px));max-height:90dvh;display:flex;flex-direction:column;box-shadow:0 20px 70px #0e353b40}.ly-edit-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}.ly-edit-head h2{font-size:21px}.ly-edit-body{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;overflow-y:auto;padding:2px 3px 6px}.ly-edit-body label{display:flex;flex-direction:column;gap:7px;font-size:12px;font-weight:700;color:#435665}.ly-edit-body input,.ly-edit-body select,.ly-edit-body textarea{border:1px solid #dce5e8;border-radius:9px;padding:10px 12px;background:#fdfefe;color:#263d4d;font-size:13px;width:100%}.ly-edit-body input[readonly]{background:#f2f5f6;color:#96a2ac}.ly-edit-wide{grid-column:1/-1}.ly-edit-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:17px}.ly-edit-actions button{border-radius:9px;padding:11px 18px;background:#e9f0f0;font-size:13px;font-weight:700}.ly-edit-actions button[type=submit]{background:#206f59;color:#fff}
-@media(max-width:1240px){.ly-settings-grid{grid-template-columns:270px minmax(0,1fr)}.ly-settings-page{padding:22px 18px}.ly-settings-hero{flex-wrap:wrap}.ly-settings-menu-copy small{font-size:11px}}@media(max-width:930px){.ly-settings-grid{grid-template-columns:1fr}.ly-settings-menu{min-height:0;display:flex;overflow-x:auto;gap:5px;padding:8px}.ly-settings-menu-item{min-width:150px;width:auto;min-height:64px;flex-shrink:0}.ly-settings-menu-copy small,.ly-settings-menu-item>svg:last-child{display:none}.ly-settings-menu-item.logout{margin-top:0;border-top:0;border-left:1px solid #e5ebee;padding:10px}.ly-settings-content{padding-bottom:15px}}@media(max-width:600px){.ly-settings-page{padding:17px 12px}.ly-settings-title h1{font-size:25px}.ly-settings-card{padding:17px}.ly-settings-hero{padding:19px}.ly-settings-hero-inner .avatar{--avatar-size:67px!important}.ly-settings-hero-user h2{font-size:17px}.ly-profile-field{grid-template-columns:24px minmax(75px,.7fr) minmax(90px,1fr) 26px;gap:7px;font-size:11px}.ly-settings-quick{grid-template-columns:1fr}.ly-settings-quick button+button{border:0;border-top:1px solid #e7ecef;padding-left:0}.ly-edit-body{grid-template-columns:1fr}}
+/* =========================================================
+   LyraChat UX: Messenger-inspired contextual action controls
+   Only changes the presentation of existing local demo features.
+   ========================================================= */
 
+/* Shared popover, portaled to body so scrolling parents cannot clip it. */
+.action-menu-trigger {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff;
+  color: #425b66;
+  box-shadow: 0 1px 4px #234e4620;
+  border: 1px solid #e2ebe9;
+  transition: background .15s, color .15s, opacity .15s;
+}
+.action-menu-trigger:hover,
+.action-menu-trigger.is-open,
+.action-menu-trigger:focus-visible {
+  background: #e5f2ed;
+  color: #205c4e;
+}
+.action-menu-popover {
+  position: fixed;
+  width: 244px;
+  z-index: 120;
+  padding: 7px;
+  background: #fff;
+  border: 1px solid #e3eae8;
+  border-radius: 14px;
+  box-shadow: 0 16px 40px #193d3240, 0 2px 7px #193d3210;
+  animation: context-appear .13s ease-out;
+}
+@keyframes context-appear {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.action-menu-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 43px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  border-radius: 9px;
+  color: #293f46;
+}
+.action-menu-option:hover,
+.action-menu-option:focus-visible { background: #ecf5f1; }
+.action-menu-option-icon { width: 20px; display: grid; place-items: center; color: #536a72; }
+.action-menu-option.with-divider { border-top: 1px solid #eef1f1; border-radius: 0 0 9px 9px; margin-top: 4px; padding-top: 13px; }
+.action-menu-option.is-danger { color: #c04444; }
+.action-menu-option.is-danger .action-menu-option-icon { color: #c04444; }
+.action-menu-option.is-danger:hover { background: #fff0ef; }
+
+/* Sidebar: a single ellipsis instead of three permanent buttons. */
+.conversation-entry { position: relative; border-radius: 15px; }
+.conversation-entry > .conversation { width: 100%; padding-right: 44px; }
+.conversation-more-button {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  opacity: 0;
+  visibility: hidden;
+  z-index: 2;
+}
+.conversation-entry:hover .conversation-more-button,
+.conversation-entry:focus-within .conversation-more-button,
+.conversation-more-button.is-open {
+  opacity: 1;
+  visibility: visible;
+}
+.conversation-entry .conversation-end { margin-right: 0; }
+.conversation-entry:hover .conversation-end,
+.conversation-entry:focus-within .conversation-end { opacity: .3; }
+.sidebar-help { color: #627e79; }
+/* Remove the old full-width action bar when older CSS is present. */
+.conversation-controls { display: none !important; }
+
+/* Message actions are a compact floating toolbar beside OWN message. */
+.message-line.mine .message-body { position: relative; }
+.message-quick-actions {
+  position: absolute;
+  right: 100%;
+  padding-right: 6px;
+  top: 1px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .15s;
+}
+.message-line.mine:hover .message-quick-actions,
+.message-line.mine:focus-within .message-quick-actions,
+.message-quick-actions:has(.is-open) {
+  opacity: 1;
+  visibility: visible;
+}
+.message-more-button { width: 32px; height: 32px; min-width: 32px; }
+.message-actions { display: none !important; }
+.message-edit {
+  width: min(370px, 70vw);
+  max-width: 100%;
+  background: #fff;
+  padding: 13px;
+  border: 1px solid #dbe8e3;
+  border-radius: 14px;
+  box-shadow: 0 8px 28px #16392d18;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 9px;
+}
+.message-edit label { font-weight: 700; font-size: 12px; color: #204b3e; }
+.message-edit textarea {
+  width: 100%;
+  min-height: 65px;
+  max-height: 190px;
+  padding: 10px 12px;
+  resize: vertical;
+  border: 1px solid #d8e6e1;
+  border-radius: 10px;
+  background: #f7faf9;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.message-edit-footer { display: flex; justify-content: flex-end; gap: 8px; }
+.message-edit .message-edit-footer button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.message-edit .edit-cancel { background: #edf2f0; color: #526861; }
+.message-edit .edit-save { background: #245b4e; color: #fff; }
+.message-edit .edit-save:disabled { opacity: .4; }
+.chat-header-more-button { box-shadow: none; border: 0; background: transparent; width: 38px; height: 38px; }
+.chat-header-tools .action-menu-trigger { flex: 0 0 38px; }
+
+/* Group management: visible member list with clear edit/add actions. */
+.group-detail-members { display: flex; flex-direction: column; gap: 6px; }
+.group-detail-member { display: flex; align-items: center; gap: 10px; padding: 7px 2px; }
+.group-detail-member > span:last-child { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.group-detail-member strong { font-size: 12px; color: #254038; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-detail-member small { color: #899c99; font-size: 10px; }
+.manage-group-button {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 42px;
+  margin-top: 5px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: #eaf5ef;
+  color: #215e4d;
+  font-weight: 700;
+  font-size: 11.5px;
+  text-align: left;
+}
+.manage-group-button:hover { background: #d6eae0; }
+.manage-group-button.is-secondary { background: #f3f6f5; color: #486158; }
+.manage-group-button.is-secondary:hover { background: #e6eeea; }
+.group-form { display: flex; flex-direction: column; gap: 14px; }
+.group-form-lead { font-size: 12px; color: #7b8f88; line-height: 1.6; }
+.group-form .group-name-field { display: flex; flex-direction: column; gap: 8px; font-size: 12px; font-weight: 700; color: #344b43; }
+.group-form .group-name-field input { padding: 12px 13px; border: 1px solid #d8e5df; border-radius: 11px; font-size: 13px; }
+.group-form .group-name-field input:focus { border-color: #397a64; box-shadow: 0 0 0 3px #397a6420; }
+.group-member-heading { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+.group-member-heading strong { color: #2a433b; }
+.group-member-heading span { color: #2c7560; font-size: 11px; font-weight: 700; }
+.group-contact-search { display: flex; align-items: center; gap: 8px; border-radius: 11px; background: #f2f6f4; color: #789188; padding: 0 12px; }
+.group-contact-search input { flex: 1; min-width: 0; background: transparent; height: 40px; font-size: 12px; }
+.group-selected-members { display: flex; flex-wrap: wrap; gap: 6px; }
+.group-selected-members button { display: flex; align-items: center; gap: 7px; padding: 7px 9px; border-radius: 20px; background: #e1f1e9; color: #28624e; font-size: 10px; font-weight: 700; }
+.group-selected-members button:hover { background: #cce7d9; }
+.group-member-list { display: flex; flex-direction: column; gap: 3px; max-height: 240px; overflow-y: auto; padding-right: 3px; }
+.group-member-list .group-member-option { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 10px; cursor: pointer; }
+.group-member-list .group-member-option:hover { background: #f0f6f3; }
+.group-member-name { flex: 1; font-size: 12px; font-weight: 600; }
+.group-member-option input[type="checkbox"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.group-checkmark { width: 21px; height: 21px; display: grid; place-items: center; border: 1.5px solid #c9dbd4; border-radius: 50%; color: transparent; }
+.group-member-option input:checked + .group-checkmark { background: #276451; border-color: #276451; color: #fff; }
+.group-member-option input:focus-visible + .group-checkmark { outline: 2px solid #286c59; outline-offset: 3px; }
+.group-no-results { color: #82938c; font-size: 11px; text-align: center; padding: 14px; }
+.group-form-footer { display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid #e7eeeb; padding-top: 15px; }
+.group-form-footer button { padding: 10px 16px; border-radius: 10px; font-size: 12px; font-weight: 700; }
+.group-form-footer .group-cancel { background: #eff3f1; color: #536a61; }
+.group-form-footer .group-submit { background: #245b4e; color: #fff; }
+.group-form-footer .group-submit:hover { background: #174c3f; }
+
+@media (hover: none) {
+  .conversation-more-button, .message-quick-actions { opacity: 1; visibility: visible; }
+  .conversation-end { opacity: .4; }
+}
+@media (max-width: 760px) {
+  .chat-header-tools .chat-header-more-button { display: inline-grid; width: 32px; height: 34px; flex-basis: 32px; }
+  .conversation-more-button { right: 8px; }
+  .message-edit { width: min(310px, 75vw); }
+  .group-form-footer { position: sticky; bottom: -1px; background: #fff; }
+}
+/* Trạng thái kết nối API: không làm vỡ layout 4 cột. */
+.api-status { position:fixed; z-index:40; left:260px; bottom:75px; max-width:min(580px,calc(100vw - 280px)); border:1px solid #d8e5e1; background:#fff; color:#173e38; border-radius:10px; box-shadow:0 8px 28px #183d3422; padding:10px 14px; font-size:13px; display:flex; gap:12px; align-items:center; }
+.api-status button { border:0;background:transparent;cursor:pointer;font-size:20px; }
+.api-toolbar { position:fixed;right:20px;bottom:8px;z-index:25; display:flex;flex-wrap:wrap;gap:7px; }
+.api-toolbar button { padding:5px 10px; border-radius:7px; border:1px solid #cae0d8; background:#e7f4ef; color:#185347; display:flex; gap:4px;align-items:center;font-size:11px;cursor:pointer; }
+@media(max-width:750px){.api-status{left:10px;bottom:65px;max-width:calc(100vw - 20px)}.api-toolbar{right:5px;bottom:3px}}
