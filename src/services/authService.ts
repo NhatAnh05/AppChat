@@ -14,8 +14,8 @@ export interface RegisterAccountInput {
  * Không lưu mật khẩu ở localStorage/sessionStorage, không ghi request ra console.
  */
 export function registerAccount(
-  input: RegisterAccountInput,
-  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+    input: RegisterAccountInput,
+    options: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<RegisterResponse> {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(WS_URL);

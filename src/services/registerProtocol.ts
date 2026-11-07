@@ -1,4 +1,3 @@
-/** Giao thức REGISTER theo chat_API.xlsx, sheet 0Sheet1, dòng 2. */
 export interface RegisterRequest {
   action: 'onchat';
   data: {
@@ -24,7 +23,6 @@ export function makeRegisterRequest(username: string, password: string): Registe
   };
 }
 
-/** Bỏ qua frame không phải phản hồi REGISTER; không giả định mọi frame là JSON hợp lệ. */
 export function readRegisterResponse(raw: string): RegisterResponse | null {
   let value: unknown;
   try {
