@@ -375,3 +375,48 @@
 .ly-diagnostics-log time {color:#6c8078;margin-right:9px}
 .ly-diagnostics-log span {color:#2d7562;margin-left:7px}
 .ly-diagnostics>.group-submit {align-self:flex-end;background:#2c705b;color:white;border-radius:10px;padding:9px 12px;font-size:12px}
+
+/* Commit 2: rich message actions, saved messages, searchable result navigation, local exports. */
+.ly-message-tools{display:flex;align-items:center;gap:4px;margin:2px 0 4px;opacity:.55;transition:opacity .16s}
+.message-line:hover .ly-message-tools,.message-line:focus-within .ly-message-tools{opacity:1}
+.ly-message-tools button{display:grid;place-items:center;height:27px;width:29px;border-radius:8px;color:#547a70;background:#edf5f1;border:1px solid transparent}
+.ly-message-tools button:hover,.ly-message-tools button:focus-visible{color:#195b49;border-color:#bbd9ca;background:#def2e7}
+.ly-message-tools button[aria-pressed="true"]{color:#156b51;background:#d6f1e3}
+.ly-search-nav{gap:8px}.ly-search-nav button{width:28px;height:30px;flex:0 0 28px;border-radius:8px}.ly-search-nav button:hover:not(:disabled){background:#e5f2eb;color:#1f6e56}
+.ly-search-nav button:disabled{opacity:.32;cursor:not-allowed}
+.ly-search-current .bubble{outline:3px solid #289773;outline-offset:2px}
+.ly-saved-filter{padding:9px 20px;display:flex;align-items:center;gap:8px;font-size:11px;color:#2c6f59;background:#eaf7ef;border-bottom:1px solid #cce9d7;flex-wrap:wrap}
+.ly-saved-filter button{color:#165d49;text-decoration:underline;font-weight:700}
+.ly-saved-empty{text-align:center;color:#718b82;font-size:12px;padding:30px 10px}
+.ly-message-feedback{position:absolute;z-index:7;top:86px;left:50%;transform:translateX(-50%);max-width:min(460px,90%);padding:9px 12px;background:#fff;border:1px solid #cde6d9;border-radius:10px;box-shadow:0 9px 30px #164e3920;font-size:11px;color:#28614f;display:flex;gap:10px;align-items:center}
+.ly-message-feedback button{flex:0 0 auto;color:#55796b}
+.ly-compose-reply{display:flex;align-items:center;gap:11px;margin:10px 25px 0;padding:10px 13px;background:#eaf5ee;border-left:3px solid #398b6c;border-radius:9px;color:#316e58;min-width:0}
+.ly-compose-reply>div{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}.ly-compose-reply strong{font-size:11px}.ly-compose-reply span{white-space:nowrap;text-overflow:ellipsis;overflow:hidden;font-size:11px;color:#6f827b}.ly-compose-reply>button{padding:4px;border-radius:6px}
+.ly-quote-reply{margin-bottom:3px;max-width:100%;overflow-wrap:anywhere}
+@media(hover:none){.ly-message-tools{opacity:1}}
+@media(max-width:640px){.ly-message-tools{opacity:1}.ly-compose-reply{margin-inline:14px}.ly-search-nav{gap:2px;padding-inline:8px}.ly-search-nav span{font-size:9px}.ly-saved-filter{padding-inline:10px}.ly-message-feedback{top:74px}}
+
+/* Commit 3: forwarding, bulk message tools, media library and local private notes. */
+.ly-selected-message{background:#e9f6ee;border-radius:13px;outline:1px solid #b8ddcc}
+.ly-message-select{flex:0 0 auto;align-self:center;margin:3px 8px;display:grid;place-items:center;color:#448772;background:transparent;border-radius:7px;padding:5px}
+.ly-message-select[aria-pressed="true"]{color:#0d7955;background:#d6eee0}
+.ly-bulk-bar{display:flex;align-items:center;gap:8px;padding:10px 16px;background:#eaf6ef;border-bottom:1px solid #cde7d7;flex-wrap:wrap;font-size:11px;color:#29644f}
+.ly-bulk-bar>strong{margin-right:6px}.ly-bulk-bar button{display:flex;align-items:center;gap:5px;background:#fff;border:1px solid #d0e4d9;border-radius:8px;padding:7px 9px;font-size:11px;color:#276650;font-weight:700;cursor:pointer}
+.ly-bulk-bar button:disabled{opacity:.35;cursor:not-allowed}.ly-bulk-bar button:last-child{margin-left:auto}
+.ly-private-note{padding:12px 20px;display:flex;flex-direction:column;gap:8px;background:#fff9e8;border-bottom:1px solid #f0e2be;color:#715d2e}
+.ly-private-note>div{display:flex;align-items:center;gap:8px}.ly-private-note strong{font-size:12px}.ly-private-note>div>button{margin-left:auto;padding:5px;border-radius:6px}
+.ly-private-note textarea{width:100%;min-height:58px;max-height:180px;resize:vertical;background:#fffefa;border:1px solid #e4d5ac;border-radius:9px;padding:9px 11px;font:12px/1.5 inherit;color:#63522c}
+.ly-private-note small,.ly-library small,.ly-forward-modal small{font-size:10px;line-height:1.6;color:#806e45}
+.ly-library{border-bottom:1px solid #d8e7df;background:#f9fcfa;padding:12px 20px;display:flex;flex-direction:column;gap:10px;max-height:340px;overflow:auto}
+.ly-library-head{display:flex;justify-content:space-between;align-items:center;gap:10px}.ly-library-head strong{display:flex;align-items:center;gap:8px;color:#245f4c;font-size:13px}.ly-library-head button{display:grid;place-items:center;border:0;background:#e8f4ec;border-radius:8px;padding:6px;color:#266b54}
+.ly-library-filters{display:flex;gap:6px;flex-wrap:wrap}.ly-library-filters button{font-size:11px;border:1px solid #d7e8de;padding:6px 10px;border-radius:20px;color:#427362;background:#fff}.ly-library-filters button.selected{color:#fff;background:#2b725a;border-color:#2b725a}
+.ly-library-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:9px}.ly-library-entry{min-width:0;border:1px solid #e2ebe5;border-radius:11px;background:#fff;padding:7px;display:flex;flex-direction:column;gap:6px}.ly-library-entry>span{font-size:11px;color:#567268;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ly-library-entry>button:last-child{font-size:10px;color:#266c54;padding:6px;background:#e9f5ed;border-radius:6px;font-weight:700}
+.ly-library-thumb{border-radius:9px;border:0;background:#eff5f0;height:82px;overflow:hidden;padding:0}.ly-library-thumb>img{display:block;width:100%;height:100%;object-fit:cover}.ly-library-symbol{height:82px;display:grid;place-items:center;background:#edf6f0;border-radius:9px;font-size:28px}.ly-library-empty{grid-column:1/-1;padding:25px 5px;text-align:center;font-size:12px;color:#789187}
+.ly-library-jump .bubble{outline:2px solid #2d9672;outline-offset:3px}
+.ly-forward-backdrop{position:fixed;inset:0;z-index:115;background:#091a1699;display:flex;align-items:center;justify-content:center;padding:16px}
+.ly-forward-modal{background:#fff;color:#2c5143;border-radius:16px;box-shadow:0 18px 55px #09282059;width:min(440px,95vw);max-height:90dvh;overflow:auto;display:flex;flex-direction:column;gap:15px;padding:20px}
+.ly-forward-preview{padding:12px;background:#f3f7f4;border-radius:10px;font-size:12px;line-height:1.5;overflow-wrap:anywhere;max-height:115px;overflow:auto}
+.ly-forward-modal label{display:flex;flex-direction:column;gap:8px;font-size:12px;font-weight:700}.ly-forward-modal select{border:1px solid #cadfd2;background:#fff;border-radius:9px;padding:10px;color:#2c5847;width:100%}
+.ly-forward-modal small{color:#748b80}.ly-forward-modal>p{font-size:12px;color:#657b6f}
+.ly-forward-actions{display:flex;justify-content:flex-end;gap:8px}.ly-forward-actions button{padding:9px 13px;border-radius:8px;background:#eef5f0;color:#275744;display:flex;align-items:center;gap:6px}.ly-forward-actions button:last-child{background:#286b54;color:#fff}.ly-forward-actions button:disabled{opacity:.45}
+@media(max-width:640px){.ly-private-note,.ly-library{padding:10px 12px}.ly-bulk-bar{padding:8px;gap:6px}.ly-bulk-bar>strong{width:100%}.ly-bulk-bar button:last-child{margin-left:0}.ly-library{max-height:42dvh}.ly-library-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.ly-forward-modal{padding:15px}}
