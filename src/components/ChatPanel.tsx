@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, CheckCheck, ChevronDown, FileText, Image as ImageIcon, Info, LockKeyhole, MoreHorizontal, Phone, Plus, Search, SendHorizontal, Smile, UsersRound, Video, X, Paperclip, LoaderCircle, Link as LinkIcon } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, FileText, Image as ImageIcon, Info, LockKeyhole, MoreHorizontal, Phone, Plus, Search, SendHorizontal, Smile, UsersRound, Video, X, Paperclip, LoaderCircle, Link as LinkIcon } from 'lucide-react';
 import Avatar from './Avatar';
 import ActionMenu from './ActionMenu';
 import type { Conversation, Message } from '../data/previewContent';
 import { isSafeMediaUrl, makeMediaMessage, parseMediaMessage, messagePreview, type MediaItem, type MediaKind } from '../services/mediaMessages';
 import { mediaUploadEnabled, MAX_MEDIA_BYTES, uploadMediaFile } from '../services/mediaUpload';
+import { readDraft, saveDraft } from '../services/conversationStorage';
 
 
-type Props = { chat: Conversation | undefined; onBack: () => void; onDetails: () => void; onOpenCallPreview: () => void; messages: Message[]; onSend: (text: string) => boolean; onEdit: (id: string, text: string) => void; onDelete: (id: string) => void; onManageGroup?: () => void; roomBlocked?: boolean; onJoinRoom?: () => void; onRetryMessage?: (id:string)=>boolean };
+type Props = { chat: Conversation | undefined; onBack: () => void; onDetails: () => void; onOpenCallPreview: () => void; messages: Message[]; onSend: (text: string) => boolean; onEdit: (id: string, text: string) => void; onDelete: (id: string) => void; onManageGroup?: () => void; roomBlocked?: boolean; onJoinRoom?: () => void; onRetryMessage?: (id:string)=>boolean; draftNamespace: string; canSend?: boolean };
 function MessageBubble({ message, color, onExpand, onRetry }: { message: Message; color: string; onExpand: (url:string)=>void; onRetry?: (id:string)=>boolean }) {
   const media = parseMediaMessage(message.text ?? '');
   return <div className={`message-line ${message.fromMe ? 'mine' : 'theirs'}`}>
@@ -25,13 +26,13 @@ function MessageBubble({ message, color, onExpand, onRetry }: { message: Message
       })}{media.caption && <div className="bubble">{media.caption}</div>}</div>}
       {message.text && !media && <div className="bubble">{message.text.startsWith('[[LYRA_MEDIA_V1]]')?'Không thể đọc nội dung đính kèm.':message.text}</div>}
       {message.emoji && <span className="reaction-preview">{message.emoji}</span>}
-      <div className="message-meta"><time>{message.time}</time>{message.id.startsWith('local:') && <span title="Đã gửi qua WebSocket, chưa có xác nhận từ máy chủ"> · Đang chờ xác nhận</span>}{message.id.startsWith('unverified:') && <span role="status"> · Chưa xác minh đã lưu trên server</span>}{message.id.startsWith('failed:') && <span role="alert"> · Máy chủ từ chối</span>}{message.fromMe && !/^(local|unverified|failed):/.test(message.id) && (message.seen ? <CheckCheck size={14} className="seen-icon"/> : <CheckCheck size={14}/>)}</div>
+      <div className="message-meta"><time>{message.time}</time>{message.id.startsWith('local:') && <span title="Đã gửi qua WebSocket, chưa có xác nhận từ máy chủ"> · Đang chờ xác nhận</span>}{message.id.startsWith('unverified:') && <span role="status"> · Chưa xác minh đã lưu trên server</span>}{message.id.startsWith('failed:') && <span role="alert"> · Máy chủ từ chối</span>}{message.fromMe && !/^(local|unverified|failed):/.test(message.id) && (<Check size={14} aria-label="Máy chủ ghi nhận, chưa xác nhận đã đọc"/>)}</div>
       {message.fromMe && /^(unverified|failed):/.test(message.id) && onRetry && <button type="button" className="ly-message-retry" title="Gửi lại có thể tạo tin trùng nếu máy chủ đã nhận lần trước" onClick={()=>{if(window.confirm('Gửi lại tin này? Nếu máy chủ đã nhận lần trước, người nhận có thể thấy hai bản.')) onRetry(message.id);}}>Gửi lại thủ công</button>}
     </div>
   </div>;
 }
-export default function ChatPanel({ chat, onBack, onDetails, onOpenCallPreview, messages, onSend, onEdit: _onEdit, onDelete: _onDelete, onManageGroup, roomBlocked = false, onJoinRoom, onRetryMessage }: Props) {
-  const [text, setText] = useState('');
+export default function ChatPanel({ chat, onBack, onDetails, onOpenCallPreview, messages, onSend, onEdit: _onEdit, onDelete: _onDelete, onManageGroup, roomBlocked = false, onJoinRoom, onRetryMessage, draftNamespace, canSend = true }: Props) {
+  const [text, setText] = useState(() => readDraft(draftNamespace, chat?.id ?? ''));
   const [showSearch, setShowSearch] = useState(false);
   const [query, setQuery] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
@@ -69,10 +70,11 @@ export default function ChatPanel({ chat, onBack, onDetails, onOpenCallPreview, 
     finally{setUploading(false);if(fileRef.current)fileRef.current.value='';}
   };
   const endRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {setText('');setQuery('');setShowSearch(false);setShowEmoji(false);setMediaTab(null);setLightbox('');}, [chat?.id]);
+  useEffect(() => {setQuery('');setShowSearch(false);setShowEmoji(false);setMediaTab(null);setLightbox('');}, [chat?.id]);
+  useEffect(() => {saveDraft(draftNamespace, chat?.id ?? '', text);}, [draftNamespace, chat?.id, text]);
   useEffect(() => {endRef.current?.scrollIntoView({ block: 'end', behavior: 'instant' });}, [chat?.id, messages.length]);
   if (!chat) return <main className="chat-main"><div className="welcome-empty"><div className="welcome-glyph"><SendHorizontal size={30}/></div><h2>Tin nhắn của bạn</h2><p>Chọn một cuộc trò chuyện, hoặc tạo hội thoại bằng username thật.</p><span className="ui-only-hint"><LockKeyhole size={14}/> Tin nhắn và phòng chat kết nối WebSocket của giảng viên.</span></div></main>;
-  const send = () => { if (!text.trim()) return; if (onSend(text)) setText(''); };
+  const send = () => { if (!text.trim() || !canSend) return; if (onSend(text)) setText(''); };
   const conversationMatches = messages.filter(message => messagePreview(message.text ?? message.fileName ?? '').toLocaleLowerCase('vi').includes(query.toLocaleLowerCase('vi')));
   return <main className="chat-main" aria-label="Nội dung hội thoại">
     <header className="chat-header">
@@ -97,8 +99,8 @@ export default function ChatPanel({ chat, onBack, onDetails, onOpenCallPreview, 
     {chat.group && roomBlocked && <div className="room-join-notice" role="status" style={{padding:"10px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,background:"#f0f5f3"}}><span>Bạn chưa tham gia phòng này nên chưa thể gửi tin nhắn.</span><button type="button" onClick={onJoinRoom} style={{padding:"9px 13px",borderRadius:9,background:"#286456",color:"white",border:0,cursor:"pointer"}}>Tham gia phòng</button></div>}
     <div className="composer" aria-label="Khung soạn tin nhắn">
       <div className="composer-tools"><button type="button" title="Thêm ảnh, GIF, video và tệp" aria-label="Thêm nội dung" className="composer-add" onClick={() => {setShowEmoji(false);setMediaTab(value=>value?null:'image');}}><Plus size={21}/></button><button type="button" title="Chọn biểu tượng cảm xúc" aria-label="Biểu tượng cảm xúc" className="emoji-trigger" onClick={() => setShowEmoji(value => !value)}><Smile size={20}/></button></div>
-      <div className="compose-field"><textarea rows={1} aria-label="Soạn tin nhắn" placeholder={roomBlocked ? "Tham gia phòng để nhắn tin" : "Nhập tin nhắn..."} disabled={roomBlocked} value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }}/><span className="compose-note">Enter để gửi · Shift + Enter xuống dòng</span></div>
-      <button type="button" className="send-button" title="Gửi tin nhắn" aria-label="Gửi tin nhắn" onClick={send} disabled={!text.trim() || roomBlocked}><SendHorizontal size={19}/></button>
+      <div className="compose-field"><textarea rows={1} aria-label="Soạn tin nhắn" placeholder={roomBlocked ? "Tham gia phòng để nhắn tin" : !canSend ? "Đang mất kết nối – bản nháp được lưu trên máy" : "Nhập tin nhắn..."} disabled={roomBlocked} value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }}/><span className="compose-note">Enter để gửi · Shift + Enter xuống dòng</span></div>
+      <button type="button" className="send-button" title="Gửi tin nhắn" aria-label="Gửi tin nhắn" onClick={send} disabled={!text.trim() || roomBlocked || !canSend}><SendHorizontal size={19}/></button>
       {showEmoji && <div className="emoji-sample"><div className="popover-heading">Biểu tượng cảm xúc <button type="button" aria-label="Đóng emoji" onClick={() => setShowEmoji(false)}><X size={15}/></button></div><div className="emoji-grid">{['😀','🙂','😍','😅','😂','👍','❤️','✨','🎉','🙏','💙','🔥'].map(emoji => <button type="button" key={emoji} onClick={() => {setText(t => t + emoji);setShowEmoji(false);}}>{emoji}</button>)}</div><div className="emoji-caption">Emoji Unicode có thể gửi qua SEND_CHAT của thầy.</div></div>}
       {mediaTab && <div className="ly-media-picker" role="dialog" aria-label="Gửi nội dung đính kèm">
         <div className="ly-media-picker-head"><strong>Gửi nội dung</strong><button type="button" aria-label="Đóng" onClick={closeMedia}><X size={17}/></button></div>
@@ -115,6 +117,6 @@ export default function ChatPanel({ chat, onBack, onDetails, onOpenCallPreview, 
       </div>}
     </div>
     {lightbox && <div className="ly-media-lightbox" role="dialog" aria-modal="true" aria-label="Xem ảnh lớn" onClick={()=>setLightbox('')}><button type="button" aria-label="Đóng" onClick={()=>setLightbox('')}><X size={22}/></button><img src={lightbox} alt="Ảnh phóng to" onClick={e=>e.stopPropagation()}/></div>}
-    <div className="composer-bottom"><LockKeyhole size={12}/> Tin chỉ được xác nhận sau khi máy chủ trả về hoặc xuất hiện trong lịch sử <ChevronDown size={13}/></div>
+    <div className="composer-bottom"><LockKeyhole size={12}/>{!canSend && <strong style={{color:'#ad5c23'}}>Mất kết nối · bản nháp được lưu cục bộ · </strong>} Tin chỉ được xác nhận sau khi máy chủ trả về hoặc xuất hiện trong lịch sử <ChevronDown size={13}/></div>
   </main>;
 }

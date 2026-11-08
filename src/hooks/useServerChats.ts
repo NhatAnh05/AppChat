@@ -3,6 +3,9 @@ import type { Conversation, Message } from '../data/previewContent';
 import { attachChatSocket, getError, getRecentChatCommands, sendChatEvent, subscribeChat, type ServerPacket } from '../services/chatSocket';
 import { makeTextMessageRequest } from '../services/chatProtocol';
 import { messagePreview } from '../services/mediaMessages';
+import { belongsToConversation, parseChatHistory, parseServerChatMessage } from '../services/serverMessage';
+import { mergeServerHistory } from '../services/historyMerge';
+import { readConversationPreferences, saveConversationPreferences } from '../services/conversationStorage';
 
 type ApiMessage = { id?: unknown; name?: unknown; to?: unknown; mes?: unknown; createAt?: unknown; type?: unknown };
 type Pending = { id:string; conversationId:string; text:string; sentAt:number };
@@ -16,6 +19,7 @@ const normalized = (item:ApiMessage,user:string,group:boolean,index:number):Mess
   // API SEND_CHAT có thể không trả id/createAt; không dùng cùng một id giả cho mọi tin realtime.
   id:item.id != null ? str(item.id) : `server:${str(item.name)}:${str(item.to)}:${str(item.createAt)}:${index}:${str(item.mes)}`,
   text:str(item.mes),fromMe:str(item.name)===user,time:clock(item.createAt),
+  ...(item.createAt && Number.isFinite(new Date(str(item.createAt).replace(' ','T')).getTime()) ? {createdAt:new Date(str(item.createAt).replace(' ','T')).toISOString()} : {}),
   ...(group && str(item.name)!==user ? {replyTo:`Người gửi: ${str(item.name)}`} : {}),
 });
 const toChat = (name:string,group:boolean):Conversation => ({id:key(name,group),name,initial:name.slice(0,1).toUpperCase(),color:group?'#637f99':'#4c9c8a',preview:'Bắt đầu cuộc trò chuyện',time:'',unread:0,group});
@@ -34,6 +38,9 @@ export function useServerChats(username:string){
   const [busy,setBusy]=useState(false);
   const [online,setOnline]=useState<Record<string,boolean>>({});
   const [exists,setExists]=useState<Record<string,boolean>>({});
+  const preferences=useRef(readConversationPreferences(username));
+  const historyPages=useRef<Record<string,number>>({});
+  const [historyHasMore,setHistoryHasMore]=useState<Record<string,boolean>>({});
   // null: chưa kiểm tra; false: server báo không thuộc phòng; true: JOIN_ROOM/lịch sử đã được xác nhận.
   const [roomMembership,setRoomMembership]=useState<Record<string,boolean>>({});
   const joiningRoom=useRef<string|null>(null);
@@ -161,7 +168,7 @@ export function useServerChats(username:string){
         }).filter((x):x is Conversation=>x!==null);
         setConversations(old=>{
           const existing=new Map(old.map(c=>[c.id,c]));
-          const fromServer=server.map(c=>({...existing.get(c.id),...c,preview:existing.get(c.id)?.preview||c.preview,unread:existing.get(c.id)?.unread??0}));
+          const fromServer=server.map(c=>({...preferences.current[c.id],...existing.get(c.id),...c,preview:existing.get(c.id)?.preview||c.preview,unread:existing.get(c.id)?.unread??0}));
           return [...fromServer,...old.filter(c=>!server.some(s=>s.id===c.id))];
         });
       }
@@ -184,9 +191,11 @@ export function useServerChats(username:string){
         const expectedName=job.id.split(':').slice(1).join(':');
         if(explicitName && explicitName!==expectedName)return; // stale response, wait for current request
         const group=job.id.startsWith('room:');
-        const arr=Array.isArray(data)?data:Array.isArray(payload.chatMess)?payload.chatMess:[];
-        const validHistory=(arr as ApiMessage[]).filter(obj);
-        const confirmed=validHistory.map((m,i)=>normalized(m,username,group,i));
+        const validHistory=parseChatHistory(data);
+        if(!validHistory){finishHistory();setError('Server trả lịch sử không đúng định dạng.');return;}
+        const confirmed=validHistory.filter(m=>belongsToConversation(m,username,job.id)).map((m,i)=>normalized(m,username,group,i));
+        historyPages.current[job.id]=Math.max(historyPages.current[job.id]||0,job.page);
+        setHistoryHasMore(old=>({...old,[job.id]:validHistory.length>=50}));
         historyReady.current=true;
         // Match each optimistic message with at most one server record, preferably newer records.
         const claimed=new Set<number>();
@@ -207,8 +216,8 @@ export function useServerChats(username:string){
           const previous=old[job.id]??[];
           // Keep locally stored, unconfirmed and failed messages across reloads and history refresh.
           // Only server-provided ids or explicit SEND_CHAT acknowledgements count as confirmed.
-          const localRecords=previous.filter(m=>/^(local|unverified|failed):/.test(m.id) && !confirmedLocalIds.has(m.id));
-          return {...old,[job.id]:dedupe(job.page===1?[...confirmed,...localRecords]:[...confirmed,...previous])};
+          const records=previous.filter(m=>!confirmedLocalIds.has(m.id));
+          return {...old,[job.id]:mergeServerHistory(records,confirmed,job.page)};
         });
         if(confirmed.length){
           const last=confirmed[confirmed.length-1];
@@ -222,15 +231,19 @@ export function useServerChats(username:string){
         finishHistory();
       }
       if(packet.event==='SEND_CHAT' && obj(data)){
-        const sender=str(data.name),target=str(data.to),content=str(data.mes),group=data.type==='room'||Number(data.type)===1;
-        if(!sender||!target||!content)return;
+        const incoming=parseServerChatMessage(data);
+        if(!incoming)return;
+        const sender=incoming.name,target=incoming.to,content=incoming.mes,group=incoming.type===1;
         const id=key(group?target:sender===username?target:sender,group);
+        if(!belongsToConversation(incoming,username,id))return;
         const idx=sender===username && packet.status==='success' ?pending.current.findIndex(p=>p.conversationId===id && p.text===content):-1;
         const matched=idx>=0?pending.current.splice(idx,1)[0]:undefined;
-        const item=normalized(data as ApiMessage,username,group,0);
+        const item=normalized(incoming,username,group,0);
         // Không tái sử dụng id giả của phản hồi thiếu id/createAt: mỗi tin mới là một sự kiện riêng.
         // Với tin tự gửi, khớp một optimistic message để không hiện tin hai lần.
         if(data.id == null) item.id=matched ? `ack:${matched.id}` : `live:${crypto.randomUUID()}`;
+        if(matched) item.clientSentAt=matched.sentAt;
+        if(!matched && data.id == null) item.clientReceivedAt=Date.now();
         setMessages(old=>{
           const existing=(old[id]??[]).filter(m=>m.id!==matched?.id);
           // Nếu lịch sử đã có chính bản ghi server này, tránh nhân đôi khi nhận broadcast.
@@ -239,7 +252,7 @@ export function useServerChats(username:string){
         });
         setConversations(old=>{
           const existing=old.find(c=>c.id===id);
-          const itemChat:Conversation={...(existing??toChat(id.split(':').slice(1).join(':'),group)),preview:messagePreview(content),time:item.time||now(),unread:selected.current===id?0:(existing?.unread??0)+(sender===username?0:1)};
+          const itemChat:Conversation={...(existing??toChat(id.split(':').slice(1).join(':'),group)),preview:messagePreview(content),time:item.time||now(),unread:selected.current===id && document.visibilityState==='visible' && document.hasFocus()?0:(existing?.unread??0)+(sender===username?0:1)};
           return [itemChat,...old.filter(c=>c.id!==id)];
         });
       }
@@ -291,7 +304,7 @@ export function useServerChats(username:string){
     lastSentAt.current=Date.now();
     const idLocal=`local:${crypto.randomUUID()}`;
     pending.current.push({id:idLocal,conversationId:id,text:content,sentAt:Date.now()});
-    const item:Message={id:idLocal,text:content,fromMe:true,time:now()};
+    const item:Message={id:idLocal,text:content,fromMe:true,time:now(),clientSentAt:Date.now()};
     setMessages(old=>({...old,[id]:[...(old[id]??[]),item]}));
     setConversations(old=>{
       const oldChat=old.find(c=>c.id===id);
@@ -319,10 +332,24 @@ export function useServerChats(username:string){
   const checkPerson=useCallback((name:string)=>{selected.current=key(name,false);safely('CHAT_CHECK_USER_EXIST',{user:name});},[safely]);
   // Gửi lại phải là thao tác thủ công: server có thể đã lưu tin dù chưa ACK.
   // Không tự phát lại khi reconnect để tránh trùng nội dung ở người nhận.
+  const markRead=useCallback((id:string)=>{
+    selected.current=id;
+    setConversations(old=>old.map(c=>c.id===id && c.unread?{...c,unread:0}:c));
+  },[]);
+  const updateConversation=useCallback((id:string,changes:Partial<Pick<Conversation,'pinned'|'muted'|'archived'>>)=>{
+    const previous=preferences.current[id]||{};
+    preferences.current={...preferences.current,[id]:{...previous,...changes}};
+    saveConversationPreferences(username,preferences.current);
+    setConversations(old=>old.map(c=>c.id===id?{...c,...changes}:c));
+  },[username]);
+  const loadOlderHistory=useCallback((id:string)=>{
+    if(historyHasMore[id]===false)return;
+    loadHistory(id,(historyPages.current[id]||1)+1);
+  },[historyHasMore,loadHistory]);
   const retryMessage=useCallback((id:string,messageId:string)=>{
     const item=messages[id]?.find(m=>m.id===messageId);
     if(!item || !/^(unverified|failed):/.test(item.id))return false;
     return sendMessage(id,item.text??'');
   },[messages,sendMessage]);
-  return {conversations,messages,error,busy,online,exists,roomMembership,refresh,loadHistory,retryHistory,retryMessage,sendMessage,startPerson,createRoom,joinRoom,outRoom,checkPerson,clearError:()=>setError('')};
+  return {conversations,messages,error,busy,online,exists,roomMembership,historyHasMore,refresh,loadHistory,loadOlderHistory,retryHistory,retryMessage,markRead,updateConversation,sendMessage,startPerson,createRoom,joinRoom,outRoom,checkPerson,clearError:()=>setError('')};
 }

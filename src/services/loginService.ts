@@ -1,4 +1,5 @@
 import { makeLoginRequest, readLoginResponse } from './loginProtocol';
+import { getConnectionState, setConnectionState } from './connectionHealth';
 
 const FALLBACK_WS_URL = 'wss://chat.longapp.io.vn/chat/chat';
 const WS_URL = import.meta.env.VITE_CHAT_WS_URL?.trim() || FALLBACK_WS_URL;
@@ -30,6 +31,7 @@ export function getAuthenticatedSocket(): WebSocket | null {
 /** API #4 LOGOUT chưa triển khai: chỉ đóng socket và xóa trạng thái client. */
 export function disconnectLoginSession(): void {
   manualLogout = true;
+  setConnectionState('signed-out');
   lastSession = null;
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = null;
@@ -50,6 +52,7 @@ export function loginAccount(
 ): Promise<LoginSession> {
   disconnectLoginSession();
   manualLogout = false;
+  setConnectionState('reconnecting');
 
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(WS_URL);
@@ -67,6 +70,7 @@ export function loginAccount(
     const fail = (error: Error) => {
       if (settled) return;
       settled = true;
+      setConnectionState('signed-out');
       cleanupPending();
       socket.onclose = null;
       if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) socket.close();
@@ -113,11 +117,12 @@ export function loginAccount(
       settled = true;
       cleanupPending();
       authenticatedSocket = socket;
+      setConnectionState('connected');
       lastSession = { username: input.username, reLoginCode: code };
       socket.onclose = () => {
         if (authenticatedSocket === socket) {
           authenticatedSocket = null;
-          if (!manualLogout) void reconnectSession(1, options.onDisconnected);
+          if (!manualLogout) { setConnectionState('offline'); void reconnectSession(1, options.onDisconnected); }
         }
       };
       resolve({ username: input.username, reLoginCode: code });
@@ -132,42 +137,80 @@ export function loginAccount(
   });
 }
 
-/** RE_LOGIN sau khi mất mạng. Mã phiên chỉ lưu trong RAM, không localStorage. */
+/** RE_LOGIN: backoff capped at 30 seconds. A transient network outage must not log the user out. */
 async function reconnectSession(attempt: number, onDisconnected?: () => void): Promise<void> {
   if (manualLogout || !lastSession || reconnecting) return;
   reconnecting = true;
+  setConnectionState('reconnecting');
   const session = lastSession;
+  let invalidSession = false;
   try {
     await new Promise<void>((resolve, reject) => {
       const socket = new WebSocket(WS_URL);
-      const timeout = setTimeout(() => { socket.close(); reject(new Error('Hết thời gian RE_LOGIN.')); }, 12000);
       let completed = false;
-      const fail = () => { if (completed) return; completed = true; clearTimeout(timeout); reject(new Error('RE_LOGIN thất bại.')); };
+      const fail = (error: Error) => {
+        if (completed) return;
+        completed = true;
+        clearTimeout(timeout);
+        if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) socket.close();
+        reject(error);
+      };
+      const timeout = setTimeout(() => fail(new Error('RE_LOGIN timed out')), 12000);
       socket.onopen = () => {
-        socket.send(JSON.stringify({action:'onchat',data:{event:'RE_LOGIN',data:{user:session.username,code:session.reLoginCode}}}));
+        try { socket.send(JSON.stringify({ action: 'onchat', data: { event: 'RE_LOGIN', data: { user: session.username, code: session.reLoginCode } } })); }
+        catch { fail(new Error('Cannot send RE_LOGIN')); }
       };
       socket.onmessage = message => {
         if (typeof message.data !== 'string') return;
         try {
           const packet = JSON.parse(message.data);
           if (packet.event !== 'RE_LOGIN') return;
-          if (packet.status !== 'success' || !packet.data?.RE_LOGIN_CODE) { fail(); return; }
-          completed = true; clearTimeout(timeout);
-          lastSession = {username:session.username,reLoginCode:String(packet.data.RE_LOGIN_CODE)};
+          if (packet.status !== 'success' || !packet.data?.RE_LOGIN_CODE) {
+            invalidSession = packet.status === 'error' && /expired|invalid|not login|wrong|hết hạn/i.test(String(packet.mes || ''));
+            fail(new Error('RE_LOGIN rejected')); return;
+          }
+          completed = true;
+          clearTimeout(timeout);
+          lastSession = { username: session.username, reLoginCode: String(packet.data.RE_LOGIN_CODE) };
           authenticatedSocket = socket;
           socket.onmessage = null;
           socket.onerror = null;
-          socket.onclose = () => {if(authenticatedSocket === socket && !manualLogout) {authenticatedSocket = null;void reconnectSession(1,onDisconnected);}};
+          socket.onclose = () => {
+            if (authenticatedSocket === socket && !manualLogout) {
+              authenticatedSocket = null;
+              setConnectionState('offline');
+              void reconnectSession(1, onDisconnected);
+            }
+          };
+          setConnectionState('connected');
           window.dispatchEvent(new Event('lyra:reconnected'));
           resolve();
-        } catch {fail();}
+        } catch { fail(new Error('Malformed RE_LOGIN response')); }
       };
-      socket.onerror = fail;
-      socket.onclose = fail;
+      socket.onerror = () => fail(new Error('Connection unavailable'));
+      socket.onclose = () => fail(new Error('Connection closed'));
     });
   } catch {
-    if (manualLogout) return;
-    if (attempt >= 3) { lastSession = null; onDisconnected?.(); return; }
-    reconnectTimer = setTimeout(() => {void reconnectSession(attempt+1,onDisconnected);},attempt*1500);
-  } finally { reconnecting = false; }
+    if (manualLogout || !lastSession) return;
+    if (invalidSession) {
+      lastSession = null;
+      setConnectionState('signed-out');
+      onDisconnected?.();
+      return;
+    }
+    // Retry without forcing logout for temporary 521/network failures.
+    setConnectionState('offline');
+    const delay = Math.min(30000, 1000 * 2 ** Math.min(attempt, 5));
+    reconnectTimer = setTimeout(() => { void reconnectSession(attempt + 1, onDisconnected); }, delay);
+  } finally {
+    reconnecting = false;
+  }
+}
+
+/** Explicit retry from the UI. Does not create a second socket while reconnecting. */
+export function retryConnectionNow(onDisconnected?: () => void): void {
+  if (!lastSession || manualLogout || reconnecting || getConnectionState() === 'connected') return;
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  void reconnectSession(1, onDisconnected);
 }

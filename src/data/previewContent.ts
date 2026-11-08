@@ -22,6 +22,12 @@ export type Message = {
   fromMe: boolean;
   text?: string;
   time: string;
+  /** Server timestamp for ordering and safe reconciliation (when provided). */
+  createdAt?: string;
+  /** Time the local browser attempted to send. Not proof of delivery. */
+  clientSentAt?: number;
+  /** Local receipt time for a broadcast lacking a server ID. */
+  clientReceivedAt?: number;
   day?: string;
   attachment?: 'photo' | 'file';
   fileName?: string;

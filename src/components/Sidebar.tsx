@@ -1,6 +1,7 @@
-import { BellOff, MessageSquarePlus, Pin, Search, UsersRound, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Bell, BellOff, MessageSquarePlus, Pin, Search, UsersRound, X } from 'lucide-react';
 import { useMemo } from 'react';
 import Avatar from './Avatar';
+import ActionMenu from './ActionMenu';
 import type { Conversation, Message } from '../data/previewContent';
 import { messagePreview as previewMediaMessage } from '../services/mediaMessages';
 import type { Section } from './Rail';
@@ -35,7 +36,7 @@ function ChatRow({ chat, selected, messagePreview, onClick }: { chat: Conversati
   </button>;
 }
 
-export default function Sidebar({ messagePreview = true, conversations, messages = {}, section, selected, filter, search, onSelect, onFilter, onSearch, onNewChat, onShowChat, onUpdateChat: _onUpdateChat, onRemoveChat: _onRemoveChat }: Props) {
+export default function Sidebar({ messagePreview = true, conversations, messages = {}, section, selected, filter, search, onSelect, onFilter, onSearch, onNewChat, onShowChat, onUpdateChat, onRemoveChat: _onRemoveChat }: Props) {
   const visible = useMemo(() => conversations.filter(chat => {
     if (section === 'archive' ? !chat.archived : chat.archived) return false;
     if (section === 'chats' && filter === 'unread' && chat.group) return false;
@@ -50,7 +51,11 @@ export default function Sidebar({ messagePreview = true, conversations, messages
     <div className="search-box"><Search size={18}/><input aria-label="Tìm kiếm" placeholder={section === 'contacts' ? 'Tìm trong danh bạ' : 'Tìm kiếm cuộc trò chuyện'} value={search} onChange={event => onSearch(event.target.value)}/>{search && <button type="button" aria-label="Xóa tìm kiếm" onClick={() => onSearch('')}><X size={16}/></button>}</div>
     {section === 'chats' && <div className="filters" role="group" aria-label="Bộ lọc hội thoại">{filters.map(f => <button type="button" key={f.id} onClick={() => onFilter(f.id)} className={filter === f.id ? 'active' : ''}>{f.label}</button>)}</div>}
     {section === 'contacts' && <p className="sidebar-help">Nhập username ở nút Tin nhắn mới để kiểm tra người dùng trên máy chủ.</p>}
-    <div className="conversation-list">{ordered.map(chat => <div key={chat.id} className="conversation-entry"><ChatRow chat={chat} messagePreview={messagePreview} selected={selected===chat.id} onClick={()=>{onSelect(chat.id);onShowChat();}}/></div>)}
+    <div className="conversation-list">{ordered.map(chat => <div key={chat.id} className="conversation-entry"><ChatRow chat={chat} messagePreview={messagePreview} selected={selected===chat.id} onClick={()=>{onSelect(chat.id);onShowChat();}}/><ActionMenu label={`Tùy chọn ${chat.name}`} triggerClassName="conversation-more-button" items={[
+        {label:chat.pinned?'Bỏ ghim':'Ghim lên đầu',icon:<Pin size={17}/>,onSelect:()=>onUpdateChat(chat.id,{pinned:!chat.pinned})},
+        {label:chat.muted?'Bật thông báo':'Tắt thông báo',icon:chat.muted?<Bell size={17}/>:<BellOff size={17}/>,onSelect:()=>onUpdateChat(chat.id,{muted:!chat.muted})},
+        {label:chat.archived?'Bỏ lưu trữ':'Lưu trữ hội thoại',icon:chat.archived?<ArchiveRestore size={17}/>:<Archive size={17}/>,onSelect:()=>onUpdateChat(chat.id,{archived:!chat.archived})},
+      ]}/></div>)}
       {!visible.length && <div className="list-empty"><UsersRound size={28}/><strong>Chưa có hội thoại</strong><small>Hãy tạo hội thoại hoặc tham gia phòng chat.</small></div>}
     </div>
     <div className="sidebar-bottom"><span className="sidebar-bottom-status"/><span>Kết nối API giảng viên</span><span className="preview-pill">LIVE</span></div>
