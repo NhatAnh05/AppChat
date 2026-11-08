@@ -1,7 +1,8 @@
-import { BellOff, ChevronDown, MessageSquarePlus, Pin, Search, UsersRound, X } from 'lucide-react';
+import { BellOff, MessageSquarePlus, Pin, Search, UsersRound, X } from 'lucide-react';
 import { useMemo } from 'react';
 import Avatar from './Avatar';
 import type { Conversation, Message } from '../data/previewContent';
+import { messagePreview as previewMediaMessage } from '../services/mediaMessages';
 import type { Section } from './Rail';
 
 export type Filter = 'all' | 'unread' | 'groups';
@@ -29,7 +30,7 @@ const filters: { id: Filter; label: string }[] = [
 function ChatRow({ chat, selected, messagePreview, onClick }: { chat: Conversation; selected: boolean; messagePreview: boolean; onClick: () => void }) {
   return <button type="button" className={`conversation ${selected ? 'selected' : ''}`} onClick={onClick} aria-current={selected ? 'true' : undefined}>
     <Avatar initial={chat.initial} color={chat.color} group={chat.group} presence={chat.presence} size={48}/>
-    <span className="conversation-copy"><span className="conversation-title">{chat.name}</span><span className={`conversation-preview ${chat.unread ? 'unread' : ''}`}>{messagePreview ? chat.preview : "Nội dung xem trước đã ẩn"}</span></span>
+    <span className="conversation-copy"><span className="conversation-title">{chat.name}</span><span className={`conversation-preview ${chat.unread ? 'unread' : ''}`}>{messagePreview ? previewMediaMessage(chat.preview) : "Nội dung xem trước đã ẩn"}</span></span>
     <span className="conversation-end"><span className={`conversation-time ${chat.unread ? 'emphasis' : ''}`}>{chat.time}</span>{chat.unread ? <span className="unread-bubble">{chat.unread}</span> : chat.muted ? <BellOff size={13}/> : chat.pinned ? <Pin size={13}/> : null}</span>
   </button>;
 }
@@ -40,7 +41,7 @@ export default function Sidebar({ messagePreview = true, conversations, messages
     if (section === 'chats' && filter === 'unread' && chat.group) return false;
     if (section === 'chats' && filter === 'groups' && !chat.group) return false;
     const needle=search.trim().toLocaleLowerCase('vi');
-    return !needle || `${chat.name} ${chat.preview}`.toLocaleLowerCase('vi').includes(needle) || (messages[chat.id]??[]).some(m=>(m.text??'').toLocaleLowerCase('vi').includes(needle));
+    return !needle || `${chat.name} ${chat.preview}`.toLocaleLowerCase('vi').includes(needle) || (messages[chat.id]??[]).some(m=>previewMediaMessage(m.text??'').toLocaleLowerCase('vi').includes(needle));
   }), [conversations, messages, section, filter, search]);
   const ordered = [...visible].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
 

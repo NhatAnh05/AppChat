@@ -339,3 +339,26 @@
 .ly-account-logout-area{margin-top:auto;padding-top:25px}.ly-account-logout{display:flex;align-items:center;gap:10px;width:100%;padding:13px 15px;border-radius:11px;background:#fff0f0;color:#b84141;font-size:12px;font-weight:750}.ly-account-logout:hover{background:#ffe5e5}.ly-account-confirm{background:#fff4f4;padding:15px;border-radius:12px;display:flex;flex-direction:column;gap:8px}.ly-account-confirm strong{font-size:12px;color:#913e3e}.ly-account-confirm>span{font-size:11px;color:#9c6b6b}.ly-account-confirm>div{display:flex;justify-content:flex-end;gap:9px;margin-top:8px}.ly-account-confirm button{padding:9px 15px;border-radius:8px;background:#fff;font-size:12px}.ly-account-confirm button:last-child{background:#b94444;color:#fff}
 .ly-compact-chats .conversation{min-height:59px;padding-top:7px;padding-bottom:7px}.ly-compact-chats .conversation .avatar{--avatar-size:38px!important}
 @media(max-width:640px){.ly-account-dialog{width:min(430px,96vw);max-height:92dvh}.ly-account-layout{display:flex;flex-direction:column}.ly-account-header{padding:19px}.ly-account-nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;padding:10px;border-right:0;border-bottom:1px solid #e8efed}.ly-account-nav-item{padding:9px 5px;flex-direction:column;gap:5px;text-align:center}.ly-account-nav-item>span:nth-child(2) small,.ly-account-nav-item>svg{display:none}.ly-account-nav-item strong{font-size:11px}.ly-account-content{padding:20px}.ly-account-identity{padding:15px}.ly-account-header h2{font-size:19px}}
+
+/* Rich messages: giữ bố cục hội thoại LyraChat hiện tại */
+.ly-media-items{max-width:min(350px,72vw);display:flex;flex-wrap:wrap;gap:6px;margin:3px 0}
+.ly-media-photo{position:relative;border:0;background:#edf4f0;border-radius:12px;overflow:hidden;max-width:calc(50% - 3px);min-width:125px;cursor:zoom-in;padding:0}
+.ly-media-photo:first-child:last-of-type{max-width:100%}
+.ly-media-photo img{display:block;width:100%;max-height:270px;object-fit:contain}
+.ly-media-photo span{position:absolute;bottom:5px;left:7px;font-weight:800;font-size:11px;background:#18382faa;color:#fff;border-radius:5px;padding:2px 5px}
+.ly-media-video{width:min(330px,68vw);max-height:300px;background:#07130f;border-radius:12px}
+.ly-media-file{display:flex;align-items:center;gap:10px;background:#eef5f1;padding:12px;border-radius:12px;color:#245e4d;text-decoration:none;max-width:320px;overflow-wrap:anywhere}
+.ly-media-file span{display:flex;flex-direction:column;gap:3px}.ly-media-file strong{font-size:12px}.ly-media-file small{font-size:10px;color:#77948a}
+.ly-sticker{font-size:66px;line-height:1.4}
+.ly-media-picker{position:absolute;bottom:calc(100% + 10px);left:12px;width:min(410px,calc(100vw - 36px));max-height:min(540px,72dvh);overflow:auto;z-index:36;background:#fff;border:1px solid #dce9e2;border-radius:15px;box-shadow:0 16px 45px #173e382f;padding:15px;color:#2d5145}
+.ly-media-picker-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.ly-media-picker-head strong{font-size:14px}.ly-media-picker-head button{padding:5px;border-radius:7px;background:#edf5f0}
+.ly-media-tabs{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px}.ly-media-tabs button{border-radius:9px;padding:7px 10px;font-weight:700;font-size:11px;background:#f1f6f3;color:#547368}.ly-media-tabs button.selected{background:#2b715b;color:#fff}
+.ly-media-fields{display:flex;flex-direction:column;gap:10px}.ly-media-fields label{font-size:11px;font-weight:700;display:flex;flex-direction:column;gap:6px}
+.ly-media-fields textarea,.ly-media-fields input{border:1px solid #cfded5;border-radius:9px;padding:9px;font-size:12px;resize:vertical;min-width:0}
+.ly-media-actions{display:flex;justify-content:space-between;gap:8px}.ly-media-actions button{display:flex;align-items:center;gap:5px;border-radius:9px;background:#e9f3ee;padding:9px 12px;font-size:12px;font-weight:700;color:#28634f}.ly-media-actions button.primary{background:#2b715b;color:#fff}.ly-media-actions button:disabled{opacity:.5}
+.ly-media-hint{font-size:10px;color:#7d938c;line-height:1.5}.ly-media-error{font-size:11px;color:#ac3939;margin-top:8px}
+.ly-sticker-picker{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.ly-sticker-picker button{font-size:35px;background:#f2f8f4;border-radius:10px;padding:7px;cursor:pointer}
+.ly-media-lightbox{position:fixed;inset:0;z-index:110;background:#091612e8;display:flex;align-items:center;justify-content:center;padding:40px 20px}.ly-media-lightbox>button{position:absolute;top:18px;right:20px;color:#fff;background:#ffffff22;border-radius:9px;padding:8px}.ly-media-lightbox>img{max-width:min(95vw,1100px);max-height:88dvh;object-fit:contain;border-radius:8px}
+
+.ly-message-retry { border: 1px solid #b5cbc5; border-radius: 6px; background: transparent; color: #27695c; cursor: pointer; font-size: 11px; padding: 4px 7px; margin-top: 3px; }
+.ly-message-retry:hover { background: #e9f5f0; }
