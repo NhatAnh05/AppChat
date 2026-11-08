@@ -1,13 +1,14 @@
 import { BellOff, ChevronDown, MessageSquarePlus, Pin, Search, UsersRound, X } from 'lucide-react';
 import { useMemo } from 'react';
 import Avatar from './Avatar';
-import type { Conversation } from '../data/previewContent';
+import type { Conversation, Message } from '../data/previewContent';
 import type { Section } from './Rail';
 
 export type Filter = 'all' | 'unread' | 'groups';
 type Props = {
   section: Section;
   conversations: Conversation[];
+  messages?: Record<string,Message[]>;
   selected: string;
   filter: Filter;
   search: string;
@@ -32,13 +33,14 @@ function ChatRow({ chat, selected, onClick }: { chat: Conversation; selected: bo
   </button>;
 }
 
-export default function Sidebar({ conversations, section, selected, filter, search, onSelect, onFilter, onSearch, onNewChat, onShowChat, onUpdateChat: _onUpdateChat, onRemoveChat: _onRemoveChat }: Props) {
+export default function Sidebar({ conversations, messages = {}, section, selected, filter, search, onSelect, onFilter, onSearch, onNewChat, onShowChat, onUpdateChat: _onUpdateChat, onRemoveChat: _onRemoveChat }: Props) {
   const visible = useMemo(() => conversations.filter(chat => {
     if (section === 'archive' ? !chat.archived : chat.archived) return false;
     if (section === 'chats' && filter === 'unread' && chat.group) return false;
     if (section === 'chats' && filter === 'groups' && !chat.group) return false;
-    return `${chat.name} ${chat.preview}`.toLocaleLowerCase('vi').includes(search.toLocaleLowerCase('vi'));
-  }), [conversations, section, filter, search]);
+    const needle=search.trim().toLocaleLowerCase('vi');
+    return !needle || `${chat.name} ${chat.preview}`.toLocaleLowerCase('vi').includes(needle) || (messages[chat.id]??[]).some(m=>(m.text??'').toLocaleLowerCase('vi').includes(needle));
+  }), [conversations, messages, section, filter, search]);
   const ordered = [...visible].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
 
   return <aside className="sidebar" aria-label="Danh sách hội thoại">

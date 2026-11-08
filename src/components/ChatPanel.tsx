@@ -5,7 +5,7 @@ import ActionMenu from './ActionMenu';
 import type { Conversation, Message } from '../data/previewContent';
 
 
-type Props = { chat: Conversation | undefined; onBack: () => void; onDetails: () => void; onOpenCallPreview: () => void; messages: Message[]; onSend: (text: string) => boolean; onEdit: (id: string, text: string) => void; onDelete: (id: string) => void; onManageGroup?: () => void };
+type Props = { chat: Conversation | undefined; onBack: () => void; onDetails: () => void; onOpenCallPreview: () => void; messages: Message[]; onSend: (text: string) => boolean; onEdit: (id: string, text: string) => void; onDelete: (id: string) => void; onManageGroup?: () => void; roomBlocked?: boolean; onJoinRoom?: () => void };
 function MessageBubble({ message, color }: { message: Message; color: string }) {
   return <div className={`message-line ${message.fromMe ? 'mine' : 'theirs'}`}>
     {!message.fromMe && <Avatar initial="L" color={color} size={28} className="message-avatar" />}
@@ -19,7 +19,7 @@ function MessageBubble({ message, color }: { message: Message; color: string }) 
     </div>
   </div>;
 }
-export default function ChatPanel({ chat, onBack, onDetails, onOpenCallPreview, messages, onSend, onEdit: _onEdit, onDelete: _onDelete, onManageGroup }: Props) {
+export default function ChatPanel({ chat, onBack, onDetails, onOpenCallPreview, messages, onSend, onEdit: _onEdit, onDelete: _onDelete, onManageGroup, roomBlocked = false, onJoinRoom }: Props) {
   const [text, setText] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [query, setQuery] = useState('');
@@ -50,10 +50,11 @@ export default function ChatPanel({ chat, onBack, onDetails, onOpenCallPreview, 
         <MessageBubble message={message} color={chat.color}/>
       </div>)}</div><div ref={endRef}/>
     </section>
+    {chat.group && roomBlocked && <div className="room-join-notice" role="status" style={{padding:"10px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,background:"#f0f5f3"}}><span>Bạn chưa tham gia phòng này nên chưa thể gửi tin nhắn.</span><button type="button" onClick={onJoinRoom} style={{padding:"9px 13px",borderRadius:9,background:"#286456",color:"white",border:0,cursor:"pointer"}}>Tham gia phòng</button></div>}
     <div className="composer" aria-label="Khung soạn tin nhắn">
       <div className="composer-tools"><button type="button" title="Thêm nội dung" aria-label="Thêm nội dung" className="composer-add" onClick={() => setShowEmoji(value => !value)}><Plus size={21}/></button><button type="button" title="Chọn biểu tượng cảm xúc" aria-label="Biểu tượng cảm xúc" className="emoji-trigger" onClick={() => setShowEmoji(value => !value)}><Smile size={20}/></button></div>
-      <div className="compose-field"><textarea rows={1} aria-label="Soạn tin nhắn" placeholder="Nhập tin nhắn..." value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }}/><span className="compose-note">Enter để gửi · Shift + Enter xuống dòng</span></div>
-      <button type="button" className="send-button" title="Gửi tin nhắn" aria-label="Gửi tin nhắn" onClick={send} disabled={!text.trim()}><SendHorizontal size={19}/></button>
+      <div className="compose-field"><textarea rows={1} aria-label="Soạn tin nhắn" placeholder={roomBlocked ? "Tham gia phòng để nhắn tin" : "Nhập tin nhắn..."} disabled={roomBlocked} value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }}/><span className="compose-note">Enter để gửi · Shift + Enter xuống dòng</span></div>
+      <button type="button" className="send-button" title="Gửi tin nhắn" aria-label="Gửi tin nhắn" onClick={send} disabled={!text.trim() || roomBlocked}><SendHorizontal size={19}/></button>
       {showEmoji && <div className="emoji-sample"><div className="popover-heading">Biểu tượng cảm xúc <button type="button" aria-label="Đóng emoji" onClick={() => setShowEmoji(false)}><X size={15}/></button></div><div className="emoji-grid">{['😀','🙂','😍','😅','😂','👍','❤️','✨','🎉','🙏','💙','🔥'].map(emoji => <button type="button" key={emoji} onClick={() => {setText(t => t + emoji);setShowEmoji(false);}}>{emoji}</button>)}</div><div className="emoji-caption">Bảng emoji minh họa</div></div>}
     </div>
     <div className="composer-bottom"><LockKeyhole size={12}/> Tin chỉ được xác nhận sau khi máy chủ trả về hoặc xuất hiện trong lịch sử <ChevronDown size={13}/></div>

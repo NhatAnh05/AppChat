@@ -1,245 +1,307 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Conversation, Message } from '../data/previewContent';
-import { attachChatSocket, getError, sendChatEvent, subscribeChat, type ServerPacket } from '../services/chatSocket';
+import { attachChatSocket, getError, getRecentChatCommands, sendChatEvent, subscribeChat, type ServerPacket } from '../services/chatSocket';
+import { makeTextMessageRequest } from '../services/chatProtocol';
 
-type ApiRoom = { name?: unknown; type?: unknown; actionTime?: unknown; user?: unknown; chatMess?: unknown };
 type ApiMessage = { id?: unknown; name?: unknown; to?: unknown; mes?: unknown; createAt?: unknown; type?: unknown };
-const text = (value: unknown) => typeof value === 'string' ? value : String(value ?? '');
-const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-const time = (value: unknown) => {
-  const source = text(value);
-  if (!source) return '';
-  const date = new Date(source.replace(' ', 'T'));
-  return Number.isNaN(date.getTime()) ? source : date.toLocaleTimeString('vi-VN', {hour:'2-digit',minute:'2-digit'});
-};
-const roomKey = (name: string, group: boolean) => `${group ? 'room' : 'people'}:${name}`;
-const convertRoom = (entry: ApiRoom): Conversation | null => {
-  const name = text(entry.name).trim();
-  if (!name) return null;
-  const group = Number(entry.type) === 1;
-  return { id: roomKey(name,group), name, initial: name.slice(0,1).toUpperCase(), color: group ? '#637f99' : '#4c9c8a',
-    preview: group ? 'Phòng chat nhóm' : 'Trò chuyện cá nhân', time: time(entry.actionTime), unread: 0, group };
-};
-const convertMessages = (entries: ApiMessage[], username: string, recipient: string, group: boolean): Message[] =>
-  entries.filter(item => item && typeof item === 'object').map((item, index) => ({
-    id: text(item.id || `server-${recipient}-${index}-${text(item.createAt)}`),
-    fromMe: text(item.name) === username,
-    text: text(item.mes),
-    time: time(item.createAt),
-    seen: false,
-    ...(group && text(item.name) !== username ? { replyTo: `Người gửi: ${text(item.name)}` } : {}),
-  }));
+type Pending = { id:string; conversationId:string; text:string; sentAt:number };
+type HistoryJob = { id:string; page:number };
+const str = (v:unknown) => typeof v === 'string' ? v : String(v ?? '');
+const obj = (v:unknown):v is Record<string,unknown> => !!v && typeof v==='object' && !Array.isArray(v);
+const key = (name:string, group:boolean) => `${group?'room':'people'}:${name}`;
+const clock = (value:unknown) => {const d=new Date(str(value).replace(' ','T'));return Number.isNaN(d.getTime())?'':d.toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'});};
+const now = () => new Date().toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'});
+const normalized = (item:ApiMessage,user:string,group:boolean,index:number):Message => ({
+  // API SEND_CHAT có thể không trả id/createAt; không dùng cùng một id giả cho mọi tin realtime.
+  id:item.id != null ? str(item.id) : `server:${str(item.name)}:${str(item.to)}:${str(item.createAt)}:${index}:${str(item.mes)}`,
+  text:str(item.mes),fromMe:str(item.name)===user,time:clock(item.createAt),
+  ...(group && str(item.name)!==user ? {replyTo:`Người gửi: ${str(item.name)}`} : {}),
+});
+const toChat = (name:string,group:boolean):Conversation => ({id:key(name,group),name,initial:name.slice(0,1).toUpperCase(),color:group?'#637f99':'#4c9c8a',preview:'Bắt đầu cuộc trò chuyện',time:'',unread:0,group});
+const dedupe = (items:Message[]) => [...new Map(items.map(x=>[x.id,x])).values()];
+function readCache(user:string):{conversations:Conversation[];messages:Record<string,Message[]>} {
+  try {const parsed=JSON.parse(localStorage.getItem(`lyra:history:v2:${user}`) || '{}');return {
+    conversations:Array.isArray(parsed.conversations)?parsed.conversations:[],
+    messages:obj(parsed.messages)?Object.fromEntries(Object.entries(parsed.messages).map(([id,list])=>[id,Array.isArray(list)?list.filter(obj).map(m=>({...m,id:str(m.id).replace(/^local:/,'unverified:')})):[]])) as Record<string,Message[]>:{},
+  };}catch{return {conversations:[],messages:{}};}
+}
 
-export function useServerChats(username: string) {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [messages, setMessages] = useState<Record<string,Message[]>>({});
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [online, setOnline] = useState<Record<string,boolean>>({});
-  const [exists, setExists] = useState<Record<string,boolean>>({});
-  const requests = useRef<Record<string,number>>({});
-  const selected = useRef('');
-  // API của thầy là nguồn dữ liệu DUY NHẤT; tuyệt đối không giả lập server xác nhận.
-  // ACTION_NOT_EXIT có thể xuất hiện khi server chưa hỗ trợ một sự kiện.
-  const unsupportedProtocol = useRef(false);
-  const pending = useRef<Array<{id: string; conversationId: string; text: string; sentAt: number}>>([]);
-  const refreshTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const historyTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastError = useRef('');
-  const historySupported = useRef(false);
-  const safely = useCallback((event: Parameters<typeof sendChatEvent>[0], data: Record<string,unknown> = {}) => {
-    try { sendChatEvent(event,data); return true; }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'Không thể gửi yêu cầu.'); return false; }
-  }, []);
-  const refresh = useCallback(() => safely('GET_USER_LIST'),[safely]);
-  const loadHistory = useCallback((id: string, page = 1) => {
-    const group = id.startsWith('room:');
-    const name = id.slice(id.indexOf(':')+1);
-    selected.current = id;
-    if (!name || unsupportedProtocol.current) return;
-    requests.current[id] = page;
+export function useServerChats(username:string){
+  const [conversations,setConversations]=useState<Conversation[]>(()=>readCache(username).conversations);
+  const [messages,setMessages]=useState<Record<string,Message[]>>(()=>readCache(username).messages);
+  const [error,setError]=useState('');
+  const [busy,setBusy]=useState(false);
+  const [online,setOnline]=useState<Record<string,boolean>>({});
+  const [exists,setExists]=useState<Record<string,boolean>>({});
+  // null: chưa kiểm tra; false: server báo không thuộc phòng; true: JOIN_ROOM/lịch sử đã được xác nhận.
+  const [roomMembership,setRoomMembership]=useState<Record<string,boolean>>({});
+  const joiningRoom=useRef<string|null>(null);
+  const selected=useRef('');
+  const pending=useRef<Pending[]>([]);
+  const lastSentAt=useRef(0);
+  const historyQueue=useRef<HistoryJob[]>([]);
+  const activeHistory=useRef<HistoryJob|null>(null);
+  const historyTimeout=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const sendTimeouts=useRef<ReturnType<typeof setTimeout>[]>([]);
+  const historyReady=useRef(false);
+  // Production hiện có thể trả ACTION_NOT_EXIT cho CHAT_PEOPLE_GET_MES dù tài liệu có ghi lệnh này.
+  // Tránh gọi lặp liên tục, nhưng cho phép người dùng thử lại thủ công.
+  const historyUnsupported=useRef(false);
+
+  // Lưu bản sao lịch sử theo tài khoản. Tin không có ACK luôn giữ nhãn unverified sau F5;
+  // localStorage KHÔNG đồng nghĩa đã được server lưu, và không đồng bộ sang thiết bị khác.
+  useEffect(()=>{
+    try {
+      const snapshot:Record<string,Message[]>={};
+      for(const [id,list] of Object.entries(messages)) snapshot[id]=list.slice(-300).map(m=>({...m,id:m.id.replace(/^local:/,'unverified:')}));
+      localStorage.setItem(`lyra:history:v2:${username}`,JSON.stringify({conversations:conversations.slice(0,150),messages:snapshot}));
+    }catch{/* private browsing / quota; server remains authoritative */}
+  },[username,conversations,messages]);
+
+  const safely=useCallback((event:Parameters<typeof sendChatEvent>[0],data:Record<string,unknown>={})=>{
+    try{sendChatEvent(event,data);return true;}
+    catch(reason){setError(reason instanceof Error?reason.message:'Kết nối WebSocket không khả dụng.');return false;}
+  },[]);
+  const refresh=useCallback(()=>safely('GET_USER_LIST'),[safely]);
+  const advanceHistory=useCallback(()=>{
+    if(historyUnsupported.current || activeHistory.current || historyQueue.current.length===0)return;
+    const job=historyQueue.current.shift()!;
+    activeHistory.current=job;
     setBusy(true);
-    const dispatched = safely('CHAT_PEOPLE_GET_MES', {name,page});
-    if (!dispatched) {setBusy(false);return;}
-    // Không hỏi online trong mỗi lần tải lịch sử: tránh phát sinh API lỗi liên tục.
-  },[safely]);
-  useEffect(() => {
-    attachChatSocket();
-    const unsubscribe = subscribeChat((packet: ServerPacket) => {
-      if (packet.status === 'error') {
-        if (packet.event === 'ACTION_NOT_EXIT') {
-          unsupportedProtocol.current = true;
-          // Không quy kết bừa ACTION_NOT_EXIT cho SEND_CHAT khi chưa có request-id.
-          // Đồng thời ngừng tự tải lịch sử để không spam API.
-        }
-        const description = `${packet.event ?? 'SERVER'}: ${getError(packet)}`;
-        if (lastError.current !== description) {
-          setError(description + (packet.event === 'ACTION_NOT_EXIT'
-            ? ' — Máy chủ của thầy không nhận diện yêu cầu. Đã dừng tải lịch sử tự động; hãy kiểm tra WS → Messages.' : ''));
-          lastError.current = description;
-        }
-        if (packet.event === 'SEND_CHAT') {
-          const latest = pending.current.shift();
-          if (latest) setMessages(previous => ({
-            ...previous,
-            [latest.conversationId]: (previous[latest.conversationId] ?? []).map(item =>
-              item.id === latest.id ? {...item, id: item.id.replace('local:', 'failed:')} : item),
-          }));
-        }
-        setBusy(false);
-        return;
-      }
-      if (packet.status !== 'success') return;
-      const data = packet.data;
-      if (packet.event === 'GET_USER_LIST' && Array.isArray(data)) {
-        setConversations(previous => {
-          const fromServer = data.map(entry => isRecord(entry) ? convertRoom(entry) : null).filter((item): item is Conversation => item !== null);
-          const unseen = previous.filter(item => !fromServer.some(server => server.id === item.id));
-          return [...fromServer,...unseen];
-        });
-      }
-      if (packet.event === 'CREATE_ROOM' || packet.event === 'JOIN_ROOM' || packet.event === 'OUT_ROOM') refresh();
-      if (packet.event === 'CHAT_PEOPLE_GET_MES') {
-        const object = isRecord(data) ? data : {};
-        const name = text(object.name) || selected.current.slice(selected.current.indexOf(':')+1);
-        // Không đoán loại hội thoại chỉ từ trường `user`, vì một số
-        // response của server cũng trả danh sách user cho chat riêng.
-        const group = selected.current.startsWith('room:');
-        const id = roomKey(name,group);
-        const page = requests.current[id] || 1;
-        const arr = Array.isArray(data) ? data : (Array.isArray(object.chatMess) ? object.chatMess : []);
-        historySupported.current = true;
-        const list = convertMessages(arr as ApiMessage[],username,name,group);
-        // API trả lịch sử là nguồn xác thực tin nhắn có được lưu hay chưa.
-        // Loại tin tạm nếu tìm thấy tin tương ứng của tài khoản hiện tại.
-        const matches = [...list];
-        pending.current = pending.current.filter(pendingItem => {
-          if (pendingItem.conversationId !== id) return true;
-          const matchIndex = matches.findIndex(message => message.fromMe && message.text === pendingItem.text);
-          if (matchIndex < 0) return true;
-          matches.splice(matchIndex, 1);
-          return false;
-        });
-        setMessages(previous => {
-          const old = previous[id] ?? [];
-          const local = old.filter(item =>
-            (item.id.startsWith('local:') || item.id.startsWith('unverified:') || item.id.startsWith('failed:')) &&
-            pending.current.some(pendingItem => pendingItem.id === item.id && pendingItem.conversationId === id)
-          );
-          const merged = page === 1 ? [...list, ...local] : [...list, ...old];
-          const unique = new Map<string, Message>();
-          merged.forEach(message => unique.set(message.id,message));
-          return {...previous,[id]:[...unique.values()]};
-        });
-        if (group && Array.isArray(object.user)) {
-          const members = object.user.filter(isRecord).map(user => text(user.name)).filter(Boolean);
-          setConversations(previous => previous.map(chat=>chat.id===id ? {...chat,memberNames:members,members:`${members.length} thành viên`} : chat));
-        }
-        setBusy(false);
-      }
-      if (packet.event === 'SEND_CHAT' && isRecord(data)) {
-        const sender = text(data.name); const target = text(data.to);
-        const group = Number(data.type) === 1;
-        const id = roomKey(group ? target : (sender === username ? target : sender),group);
-        const content = text(data.mes);
-        const matchingIndex = sender === username
-          ? pending.current.findIndex(item => item.conversationId === id && item.text === content)
-          : -1;
-        const matching = matchingIndex >= 0 ? pending.current.splice(matchingIndex, 1)[0] : undefined;
-        const newMessage: Message = { id: text(data.id) || `event:${crypto.randomUUID()}`, text: content, fromMe: sender === username, time: new Date().toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'}) };
-        setMessages(previous => ({
-          ...previous,
-          [id]: [...(previous[id] ?? []).filter(item => (!matching || item.id !== matching.id) && item.id !== newMessage.id), newMessage],
-        }));
-        setConversations(previous => {
-          const old = previous.find(item=>item.id===id);
-          const updated: Conversation = old ? {...old,preview:newMessage.text??'',time:newMessage.time,unread:selected.current===id?0:old.unread+1} : {
-            id,name:group?target:(sender===username?target:sender),initial:(group?target:sender).slice(0,1).toUpperCase(),color:'#4c9c8a',preview:newMessage.text??'',time:newMessage.time,unread:1,group};
-          return [updated,...previous.filter(item=>item.id!==id)];
-        });
-      }
-      if (packet.event === 'CHAT_CHECK_USER_ONLINE' && isRecord(data)) {
-        const name = selected.current.slice(selected.current.indexOf(':')+1);
-        if (name) { const status=data.status===true;setOnline(previous=>({...previous,[name]:status}));setConversations(previous=>previous.map(chat=>chat.id===roomKey(name,false)?{...chat,presence:status?'online':'offline'}:chat)); }
-      }
-      if (packet.event === 'CHAT_CHECK_USER_EXIST' && isRecord(data)) {
-        const name = selected.current.slice(selected.current.indexOf(':')+1);
-        if(name) setExists(previous=>({...previous,[name]:data.status===true}));
-      }
-    });
-    const onReconnect = () => {
-      attachChatSocket();
-      unsupportedProtocol.current = false;
-      refresh();
-      if (selected.current) loadHistory(selected.current,1);
-    };
-    window.addEventListener('lyra:reconnected',onReconnect);
-    refresh();
-    // Server có thể chỉ broadcast SEND_CHAT cho người nhận online.
-    // Đồng bộ định kỳ qua API lịch sử để không phụ thuộc hoàn toàn vào broadcast.
-    historyTimer.current = setInterval(() => {
-      if (historySupported.current && !unsupportedProtocol.current && selected.current && document.visibilityState === 'visible') {
-        loadHistory(selected.current,1);
-      }
-    }, 20000);
-    return () => {
-      unsubscribe();
-      window.removeEventListener('lyra:reconnected',onReconnect);
-      if (historyTimer.current) clearInterval(historyTimer.current);
-      refreshTimers.current.forEach(clearTimeout);
-      refreshTimers.current = [];
-    };
-  },[username,refresh,loadHistory]);
-  const sendMessage = useCallback((id: string, value: string): boolean => {
-    const group = id.startsWith('room:');
-    const recipient = id.slice(id.indexOf(':') + 1).trim();
-    const content = value.trim();
-    if (!content || !recipient) {
-      setError('Hãy chọn hội thoại và nhập nội dung tin nhắn.');
-      return false;
+    if(!safely('CHAT_PEOPLE_GET_MES',{name:job.id.split(':').slice(1).join(':'),page:job.page})){
+      activeHistory.current=null;setBusy(false);return;
     }
-    // Chỉ xóa ô nhập khi lệnh socket.send thực sự chạy được.
-    if (!safely('SEND_CHAT', {type: group ? 'room' : 'people', to: recipient, mes: content})) return false;
-    const messageId = `local:${crypto.randomUUID()}`;
-    pending.current.push({id: messageId, conversationId: id, text: content, sentAt: Date.now()});
-    const currentTime = new Date().toLocaleTimeString('vi-VN', {hour: '2-digit', minute: '2-digit'});
-    setMessages(previous => ({...previous, [id]: [
-      ...(previous[id] ?? []),
-      {id: messageId, text: content, fromMe: true, time: currentTime, seen: false},
-    ]}));
-    setConversations(previous => previous.map(item => item.id === id
-      ? {...item, preview: content, time: currentTime}
-      : item));
-    // Chủ động kiểm tra lịch sử: socket.send() chỉ chứng minh gửi lên
-    // kết nối thành công, KHÔNG có nghĩa server đã lưu hoặc người kia nhận.
-    for (const delay of [2000, 8000]) {
-      const timer = setTimeout(() => {
-        if (!unsupportedProtocol.current && selected.current === id) loadHistory(id,1);
-        if (delay === 8000) {
-          const unresolved = pending.current.find(item => item.id === messageId);
-          if (unresolved) {
-            setMessages(previous => ({...previous,[id]:(previous[id] ?? []).map(message =>
-              message.id === messageId ? {...message,id:message.id.replace('local:','unverified:')} : message),
-            }));
-            pending.current = pending.current.map(item=>item.id===messageId?{...item,id:item.id.replace('local:','unverified:')}:item);
-            setError('Chưa được server xác nhận. Nếu API trả ACTION_NOT_EXIT hoặc mã 521, tin có thể chưa được lưu. Kiểm tra phản hồi SEND_CHAT trong Network → WS.');
+    // Avoid permanently blocking the next conversation when the server doesn't respond.
+    historyTimeout.current=setTimeout(()=>{
+      if(activeHistory.current!==job)return;
+      activeHistory.current=null;setBusy(false);
+      setError('Máy chủ không phản hồi yêu cầu lịch sử. Bạn vẫn có thể thử gửi tin.');
+      window.dispatchEvent(new Event('lyra:history-next'));
+    },10000);
+  },[safely]);
+  const loadHistory=useCallback((id:string,page=1)=>{
+    if(!id.includes(':') || historyUnsupported.current)return;
+    selected.current=id;
+    if(activeHistory.current?.id===id && activeHistory.current.page===page)return;
+    if(historyQueue.current.some(j=>j.id===id && j.page===page))return;
+    historyQueue.current.push({id,page});advanceHistory();
+  },[advanceHistory]);
+  const retryHistory=useCallback((id:string,page=1)=>{
+    // Yêu cầu người dùng kích hoạt lại sau khi API từ chối; không mở lại polling tự động.
+    historyUnsupported.current=false;
+    historyQueue.current=[];
+    if(historyTimeout.current)clearTimeout(historyTimeout.current);
+    historyTimeout.current=null;activeHistory.current=null;setBusy(false);setError('');
+    if(!id.includes(':'))return;
+    historyQueue.current.push({id,page});
+    advanceHistory();
+  },[advanceHistory]);
+  const finishHistory=useCallback(()=>{
+    if(historyTimeout.current)clearTimeout(historyTimeout.current);
+    historyTimeout.current=null;activeHistory.current=null;setBusy(false);
+    window.dispatchEvent(new Event('lyra:history-next'));
+  },[]);
+
+  useEffect(()=>{
+    attachChatSocket();
+    const unsubscribe=subscribeChat((packet:ServerPacket)=>{
+      if(packet.status==='error'){
+        const related = packet.event === 'ACTION_NOT_EXIT' ? getRecentChatCommands() : [];
+        const hint = related.length ? ` Các lệnh vừa gửi: ${related.join(', ')}. Mở F12 → Network → WS → Messages để xác định lệnh bị từ chối.` : '';
+        const historyHint=packet.event==='ACTION_NOT_EXIT' && activeHistory.current && pending.current.length===0 ? ' Server từ chối yêu cầu gần thời điểm tải lịch sử; tạm dừng tải tự động để không lặp lỗi (không suy ra SEND_CHAT thất bại).' : '';
+        const msg=`${packet.event??'SERVER'}: ${getError(packet)}${historyHint}${hint}`;
+        setError(msg);
+        if(packet.event==='ACTION_NOT_EXIT') {
+          // Production trả ACTION_NOT_EXIT ngay sau CHAT_PEOPLE_GET_MES.
+          // Không lặp request bị từ chối; không gán lỗi chung này cho SEND_CHAT.
+          if(activeHistory.current && pending.current.length===0){
+            historyUnsupported.current=true;
+            historyQueue.current=[];
+            console.warn('[LyraChat] Tạm ngừng CHAT_PEOPLE_GET_MES vì API báo ACTION_NOT_EXIT. SEND_CHAT vẫn hoạt động.');
           }
         }
-      },delay);
-      refreshTimers.current.push(timer);
-    }
+        if(packet.event==='AUTH' && /not login|chưa đăng nhập|unauthori/i.test(getError(packet))) {
+          window.dispatchEvent(new Event('lyra:auth-expired'));
+          return;
+        }
+        if(packet.event==='CHAT_PEOPLE_GET_MES' || (packet.event==='ACTION_NOT_EXIT' && activeHistory.current))finishHistory();
+        if(packet.event==='JOIN_ROOM')joiningRoom.current=null;
+        if(packet.event==='SEND_CHAT' && /not in this room/i.test(getError(packet))){
+          const last=pending.current[0];
+          if(last?.conversationId.startsWith('room:'))setRoomMembership(old=>({...old,[last.conversationId]:false}));
+        }
+        if(packet.event==='CHAT_PEOPLE_GET_MES' && activeHistory.current?.id.startsWith('room:') && /not.*(room|member)|chưa tham gia/i.test(getError(packet))){
+          setRoomMembership(old=>({...old,[activeHistory.current!.id]:false}));
+        }
+        if(packet.event==='SEND_CHAT'){
+          // SEND_CHAT lỗi thực sự: chỉ đánh dấu tin đang chờ là thất bại.
+          const p=pending.current.shift();
+          if(p)setMessages(old=>({...old,[p.conversationId]:(old[p.conversationId]??[]).map(m=>m.id===p.id?{...m,id:m.id.replace(/^(local|unverified):/,'failed:')}:m)}));
+        }
+        return;
+      }
+      // Một số bản server broadcast SEND_CHAT cho người nhận mà không kèm status.
+      // Chỉ xử lý dạng đó khi có đủ dữ liệu tin nhắn thực, không coi là ACK cho tin gửi.
+      if(packet.status!=='success' && !(packet.event==='SEND_CHAT' && !packet.status && obj(packet.data)))return;
+      const data=packet.data;
+      if(packet.event==='GET_USER_LIST' && Array.isArray(data)){
+        const server=data.filter(obj).map(entry=>{
+          const name=str(entry.name).trim(),group=Number(entry.type)===1;
+          return name?{...toChat(name,group),time:clock(entry.actionTime)}:null;
+        }).filter((x):x is Conversation=>x!==null);
+        setConversations(old=>{
+          const existing=new Map(old.map(c=>[c.id,c]));
+          const fromServer=server.map(c=>({...existing.get(c.id),...c,preview:existing.get(c.id)?.preview||c.preview,unread:existing.get(c.id)?.unread??0}));
+          return [...fromServer,...old.filter(c=>!server.some(s=>s.id===c.id))];
+        });
+      }
+      if(packet.event==='JOIN_ROOM' && joiningRoom.current){
+        const id=joiningRoom.current;joiningRoom.current=null;
+        setRoomMembership(old=>({...old,[id]:true}));
+        loadHistory(id);
+      }
+      if(packet.event==='OUT_ROOM'){
+        // Danh sách server sẽ cập nhật lại sau khi rời phòng.
+        setRoomMembership(old=>Object.fromEntries(Object.entries(old).map(([id,val])=>[id,id===selected.current?false:val])));
+      }
+      if(['CREATE_ROOM','JOIN_ROOM','OUT_ROOM'].includes(packet.event??''))refresh();
+      if(packet.event==='CHAT_PEOPLE_GET_MES'){
+        const job=activeHistory.current;
+        if(!job)return; // unmatched late response: never attach it to another chat
+        const payload=obj(data)?data:{};
+        const explicitName=str(payload.name).trim();
+        const expectedName=job.id.split(':').slice(1).join(':');
+        if(explicitName && explicitName!==expectedName)return; // stale response, wait for current request
+        const group=job.id.startsWith('room:');
+        const arr=Array.isArray(data)?data:Array.isArray(payload.chatMess)?payload.chatMess:[];
+        const validHistory=(arr as ApiMessage[]).filter(obj);
+        const confirmed=validHistory.map((m,i)=>normalized(m,username,group,i));
+        historyReady.current=true;
+        // Match each optimistic message with at most one server record, preferably newer records.
+        const claimed=new Set<number>();
+        pending.current=pending.current.filter(p=>{
+          if(p.conversationId!==job.id)return true;
+          const idx=confirmed.findIndex((m,i)=>{
+            if(claimed.has(i)||!m.fromMe||m.text!==p.text)return false;
+            const rawDate=validHistory[i].createAt;
+            if(!rawDate)return false; // Không thể xác nhận tin mới bằng một tin cũ cùng nội dung.
+            const sentTime=new Date(str(rawDate).replace(' ','T')).getTime();
+            return Number.isFinite(sentTime) && sentTime >= p.sentAt-60000;
+          });
+          if(idx<0)return true;
+          claimed.add(idx);return false;
+        });
+        setMessages(old=>{
+          const previous=old[job.id]??[];
+          const stillPending=previous.filter(m=>/^(local|unverified|failed):/.test(m.id) && pending.current.some(p=>p.id===m.id));
+          return {...old,[job.id]:dedupe(job.page===1?[...confirmed,...stillPending]:[...confirmed,...previous])};
+        });
+        if(confirmed.length){
+          const last=confirmed[confirmed.length-1];
+          setConversations(old=>old.map(c=>c.id===job.id?{...c,preview:last.text??c.preview,time:last.time||c.time}:c));
+        }
+        if(group){setRoomMembership(old=>({...old,[job.id]:true}));}
+        if(group && Array.isArray(payload.user)){
+          const members=payload.user.filter(obj).map(u=>str(u.name)).filter(Boolean);
+          setConversations(old=>old.map(c=>c.id===job.id?{...c,memberNames:members,members:`${members.length} thành viên`}:c));
+        }
+        finishHistory();
+      }
+      if(packet.event==='SEND_CHAT' && obj(data)){
+        const sender=str(data.name),target=str(data.to),content=str(data.mes),group=data.type==='room'||Number(data.type)===1;
+        if(!sender||!target||!content)return;
+        const id=key(group?target:sender===username?target:sender,group);
+        const idx=sender===username && packet.status==='success' ?pending.current.findIndex(p=>p.conversationId===id && p.text===content):-1;
+        const matched=idx>=0?pending.current.splice(idx,1)[0]:undefined;
+        const item=normalized(data as ApiMessage,username,group,0);
+        // Không tái sử dụng id giả của phản hồi thiếu id/createAt: mỗi tin mới là một sự kiện riêng.
+        // Với tin tự gửi, khớp một optimistic message để không hiện tin hai lần.
+        if(data.id == null) item.id=matched ? `ack:${matched.id}` : `live:${crypto.randomUUID()}`;
+        setMessages(old=>{
+          const existing=(old[id]??[]).filter(m=>m.id!==matched?.id);
+          // Nếu lịch sử đã có chính bản ghi server này, tránh nhân đôi khi nhận broadcast.
+          if(existing.some(m=>m.id===item.id))return old;
+          return {...old,[id]:dedupe([...existing,item])};
+        });
+        setConversations(old=>{
+          const existing=old.find(c=>c.id===id);
+          const itemChat:Conversation={...(existing??toChat(id.split(':').slice(1).join(':'),group)),preview:content,time:item.time||now(),unread:selected.current===id?0:(existing?.unread??0)+(sender===username?0:1)};
+          return [itemChat,...old.filter(c=>c.id!==id)];
+        });
+      }
+      if((packet.event==='CHAT_CHECK_USER_EXIST' || packet.event==='CHECK_USER_EXIST') && obj(data)){
+        const name=selected.current.split(':').slice(1).join(':');
+        if(name)setExists(old=>({...old,[name]:data.status===true}));
+      }
+      if((packet.event==='CHAT_CHECK_USER_ONLINE' || packet.event==='CHECK_USER_ONLINE') && obj(data)){
+        const name=selected.current.split(':').slice(1).join(':');
+        if(name)setOnline(old=>({...old,[name]:data.status===true}));
+      }
+    });
+    const next=()=>advanceHistory();
+    const reconnect=()=>{
+      // Không tự kích hoạt lại lệnh lịch sử đã bị server từ chối sau mỗi reconnect.
+      attachChatSocket();
+      if(historyTimeout.current)clearTimeout(historyTimeout.current);
+      activeHistory.current=null;historyQueue.current=[];
+      refresh();if(selected.current)loadHistory(selected.current);
+    };
+    window.addEventListener('lyra:history-next',next);
+    window.addEventListener('lyra:reconnected',reconnect);
+    refresh();
+    // Poll nhẹ để phát hiện hội thoại mới. Tin realtime dùng SEND_CHAT, lịch sử dùng API khi hỗ trợ.
+    const poll=setInterval(()=>{
+      if(document.visibilityState!=='visible')return;
+      refresh();
+      if(!historyUnsupported.current && selected.current && pending.current.length===0 && Date.now()-lastSentAt.current>30000)loadHistory(selected.current);
+    },45000);
+    const onFocus=()=>{refresh();if(!historyUnsupported.current && selected.current && pending.current.length===0 && Date.now()-lastSentAt.current>30000)loadHistory(selected.current);};
+    window.addEventListener('focus',onFocus);
+    return ()=>{
+      unsubscribe();clearInterval(poll);window.removeEventListener('focus',onFocus);
+      window.removeEventListener('lyra:history-next',next);window.removeEventListener('lyra:reconnected',reconnect);
+      if(historyTimeout.current)clearTimeout(historyTimeout.current);
+      sendTimeouts.current.forEach(clearTimeout);
+    };
+  },[username,refresh,loadHistory,finishHistory,advanceHistory]);
+
+  const sendMessage=useCallback((id:string,value:string):boolean=>{
+    const content=value.trim(),name=id.split(':').slice(1).join(':').trim(),group=id.startsWith('room:');
+    if(!name||!content){setError('Hãy chọn người nhận và nhập nội dung tin nhắn.');return false;}
+    if(group && roomMembership[id]===false){setError(`Bạn chưa tham gia phòng ${name}. Hãy nhấn Tham gia phòng trước khi gửi tin.`);return false;}
+    if(content.length>10000){setError('Tin nhắn quá dài (tối đa 10.000 ký tự).');return false;}
+    try {
+      const request=makeTextMessageRequest(name,content,group);
+      sendChatEvent('SEND_CHAT',request.data.data);
+    }catch(e){setError(e instanceof Error?e.message:'Không thể gửi tin nhắn.');return false;}
+    lastSentAt.current=Date.now();
+    const idLocal=`local:${crypto.randomUUID()}`;
+    pending.current.push({id:idLocal,conversationId:id,text:content,sentAt:Date.now()});
+    const item:Message={id:idLocal,text:content,fromMe:true,time:now()};
+    setMessages(old=>({...old,[id]:[...(old[id]??[]),item]}));
+    setConversations(old=>{
+      const oldChat=old.find(c=>c.id===id);
+      const chat={...(oldChat??toChat(name,group)),preview:content,time:item.time};
+      return [chat,...old.filter(c=>c.id!==id)];
+    });
+    const timer=setTimeout(()=>{
+      if(!pending.current.some(p=>p.id===idLocal))return;
+      setMessages(old=>({...old,[id]:(old[id]??[]).map(m=>m.id===idLocal?{...m,id:m.id.replace('local:','unverified:')}:m)}));
+      pending.current=pending.current.map(p=>p.id===idLocal?{...p,id:p.id.replace('local:','unverified:')}:p);
+      // Không gọi lịch sử tự động sau gửi: API thật đang từ chối lệnh này,
+      // còn một ACTION_NOT_EXIT không gắn requestId sẽ làm lẫn phản hồi SEND_CHAT.
+    },5000);
+    sendTimeouts.current.push(timer);
     return true;
-  }, [safely,loadHistory]);
-  const startPerson = useCallback((name:string) => {
-    const clean=name.trim(); if(!clean || clean===username) {setError('Tên người nhận không hợp lệ.');return '';}
-    const id=roomKey(clean,false);
-    setConversations(previous=>previous.some(item=>item.id===id)?previous:[{id,name:clean,initial:clean.charAt(0).toUpperCase(),color:'#4c9c8a',preview:'Chưa có tin nhắn',time:'',unread:0},...previous]);
-    safely('CHAT_CHECK_USER_EXIST',{user:clean});
-    return id;
+  },[roomMembership]);
+  const startPerson=useCallback((name:string)=>{
+    const clean=name.trim();if(!clean||clean===username){setError('Tên người nhận không hợp lệ.');return '';}
+    const id=key(clean,false);setConversations(old=>old.some(x=>x.id===id)?old:[toChat(clean,false),...old]);
+    selected.current=id;safely('CHAT_CHECK_USER_EXIST',{user:clean});return id;
   },[username,safely]);
-  const createRoom = useCallback((name:string) => { if(!name.trim())return ''; safely('CREATE_ROOM',{name:name.trim()});return roomKey(name.trim(),true); },[safely]);
-  const joinRoom = useCallback((name:string) => { if(!name.trim())return ''; safely('JOIN_ROOM',{name:name.trim()});return roomKey(name.trim(),true); },[safely]);
-  const outRoom = useCallback((id:string) => safely('OUT_ROOM',{name:id.replace(/^room:/,'')}),[safely]);
-  const checkPerson = useCallback((name:string)=>{selected.current=roomKey(name,false);safely('CHAT_CHECK_USER_EXIST',{user:name});},[safely]);
-  return {conversations,messages,error,busy,online,exists,refresh,loadHistory,sendMessage,startPerson,createRoom,joinRoom,outRoom,checkPerson,clearError:()=>setError('')};
+  const createRoom=useCallback((name:string)=>{if(!name.trim())return '';safely('CREATE_ROOM',{name:name.trim()});return key(name.trim(),true);},[safely]);
+  const joinRoom=useCallback((name:string)=>{const clean=name.trim();if(!clean)return '';const id=key(clean,true);joiningRoom.current=id;if(!safely('JOIN_ROOM',{name:clean}))joiningRoom.current=null;return id;},[safely]);
+  const outRoom=useCallback((id:string)=>safely('OUT_ROOM',{name:id.replace(/^room:/,'')}),[safely]);
+  const checkPerson=useCallback((name:string)=>{selected.current=key(name,false);safely('CHAT_CHECK_USER_EXIST',{user:name});},[safely]);
+  return {conversations,messages,error,busy,online,exists,roomMembership,refresh,loadHistory,retryHistory,sendMessage,startPerson,createRoom,joinRoom,outRoom,checkPerson,clearError:()=>setError('')};
 }
