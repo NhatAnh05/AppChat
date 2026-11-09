@@ -1,216 +1,197 @@
-import { makeLoginRequest, readLoginResponse } from './loginProtocol';
-import { getConnectionState, setConnectionState } from './connectionHealth';
+/** LOGIN (#2) and RE_LOGIN (#3) share one authenticated WebSocket. */
+import { makeLoginRequest, readLoginResponse } from './loginProtocol.ts';
+import { getConnectionState, setConnectionState } from './connectionHealth.ts';
+import { reLoginOnce, ReLoginRejectedError } from './reLoginService.ts';
+import { clearLoginSession, readLoginSession, saveLoginSession, type SavedLoginSession } from './sessionStore.ts';
 
 const FALLBACK_WS_URL = 'wss://chat.longapp.io.vn/chat/chat';
-const WS_URL = import.meta.env.VITE_CHAT_WS_URL?.trim() || FALLBACK_WS_URL;
+const WS_URL = import.meta.env?.VITE_CHAT_WS_URL?.trim() || FALLBACK_WS_URL;
+const MAX_RELOGIN_ATTEMPTS = 3;
 
-export interface LoginAccountInput {
-  username: string;
-  password: string;
-}
-
-export interface LoginSession {
-  username: string;
-  /** Mã phiên của Backend, chỉ giữ trong bộ nhớ. API RE_LOGIN sẽ dùng ở giai đoạn sau. */
-  reLoginCode: string;
-}
+export interface LoginAccountInput { username: string; password: string }
+export interface LoginSession extends SavedLoginSession {}
 
 let authenticatedSocket: WebSocket | null = null;
-let manualLogout = false;
-let reconnecting = false;
 let lastSession: LoginSession | null = null;
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let manualLogout = false;
+let authVersion = 0;
+let recoveryPromise: Promise<LoginSession | null> | null = null;
+let recoveryAbort: AbortController | null = null;
+let disconnectCallback: (() => void) | undefined;
 
-
-/** Giữ WebSocket đã đăng nhập cho API về sau. Không dùng socket REGISTER ngắn hạn. */
 export function getAuthenticatedSocket(): WebSocket | null {
-  if (authenticatedSocket?.readyState !== WebSocket.OPEN) return null;
-  return authenticatedSocket;
+  return authenticatedSocket?.readyState === WebSocket.OPEN ? authenticatedSocket : null;
 }
 
-/** API #4 LOGOUT chưa triển khai: chỉ đóng socket và xóa trạng thái client. */
+/** API #4 LOGOUT is out of scope here: clear client-side session and close socket. */
 export function disconnectLoginSession(): void {
+  authVersion++;
   manualLogout = true;
-  setConnectionState('signed-out');
+  recoveryAbort?.abort();
+  recoveryAbort = null;
+  recoveryPromise = null;
+  disconnectCallback = undefined;
+  clearLoginSession();
   lastSession = null;
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-  reconnectTimer = null;
-  const previous = authenticatedSocket;
+  setConnectionState('signed-out');
+  const current = authenticatedSocket;
   authenticatedSocket = null;
-  if (previous && (previous.readyState === WebSocket.OPEN || previous.readyState === WebSocket.CONNECTING)) {
-    previous.close();
-  }
+  if (current && (current.readyState === WebSocket.OPEN || current.readyState === WebSocket.CONNECTING)) current.close();
+}
+
+function invalidateSession(): void {
+  // Invalid backend session or exhausted retries: no silent fallback into chat.
+  if (manualLogout) return;
+  const callback = disconnectCallback;
+  disconnectLoginSession();
+  callback?.();
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('lyra:auth-expired'));
+}
+
+function bindAuthenticatedSocket(socket: WebSocket): void {
+  authenticatedSocket = socket;
+  socket.onclose = () => {
+    if (authenticatedSocket !== socket || manualLogout) return;
+    authenticatedSocket = null;
+    setConnectionState('offline');
+    void restoreLoginSession();
+  };
+  socket.onerror = () => {
+    if (authenticatedSocket === socket) setConnectionState('offline');
+    // Browsers normally deliver onclose after onerror; never open two sockets here.
+  };
 }
 
 export function loginAccount(
-  input: LoginAccountInput,
-  options: {
-    signal?: AbortSignal;
-    timeoutMs?: number;
-    onDisconnected?: () => void;
-  } = {},
+    input: LoginAccountInput,
+    options: { signal?: AbortSignal; timeoutMs?: number; onDisconnected?: () => void } = {},
 ): Promise<LoginSession> {
   disconnectLoginSession();
   manualLogout = false;
+  disconnectCallback = options.onDisconnected;
+  const version = authVersion;
   setConnectionState('reconnecting');
 
   return new Promise((resolve, reject) => {
-    const socket = new WebSocket(WS_URL);
+    if (options.signal?.aborted) { reject(new Error('Đã hủy yêu cầu đăng nhập.')); return; }
+    let socket: WebSocket;
+    try { socket = new WebSocket(WS_URL); }
+    catch { setConnectionState('signed-out'); reject(new Error('Không thể tạo kết nối WebSocket.')); return; }
     let settled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-    const cleanupPending = () => {
+    const cleanup = () => {
       if (timeoutId !== undefined) clearTimeout(timeoutId);
       options.signal?.removeEventListener('abort', onAbort);
       socket.onopen = null;
       socket.onmessage = null;
       socket.onerror = null;
+      socket.onclose = null;
     };
-
-    const fail = (error: Error) => {
+    const fail = (reason: Error) => {
       if (settled) return;
       settled = true;
-      setConnectionState('signed-out');
-      cleanupPending();
-      socket.onclose = null;
+      cleanup();
       if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) socket.close();
-      reject(error);
+      if (authVersion === version) setConnectionState('signed-out');
+      reject(reason);
     };
-
-    function onAbort() {
-      fail(new Error('Đã hủy yêu cầu đăng nhập.'));
-    }
-
+    function onAbort() { fail(new Error('Đã hủy yêu cầu đăng nhập.')); }
     options.signal?.addEventListener('abort', onAbort, { once: true });
-    if (options.signal?.aborted) {
-      onAbort();
-      return;
-    }
-
-    timeoutId = setTimeout(() => {
-      fail(new Error('Máy chủ không phản hồi LOGIN. Vui lòng thử lại.'));
-    }, options.timeoutMs ?? 12000);
-
+    if (options.signal?.aborted) { onAbort(); return; }
+    timeoutId = setTimeout(() => fail(new Error('Máy chủ không phản hồi LOGIN. Vui lòng thử lại.')), options.timeoutMs ?? 12000);
     socket.onopen = () => {
-      try {
-        socket.send(JSON.stringify(makeLoginRequest(input.username, input.password)));
-      } catch {
-        fail(new Error('Không thể gửi yêu cầu LOGIN đến máy chủ.'));
-      }
+      try { socket.send(JSON.stringify(makeLoginRequest(input.username, input.password))); }
+      catch { fail(new Error('Không thể gửi yêu cầu LOGIN đến máy chủ.')); }
     };
-
-    socket.onmessage = (event: MessageEvent) => {
+    socket.onmessage = event => {
       if (typeof event.data !== 'string') return;
       const response = readLoginResponse(event.data);
       if (!response) return;
-
-      if (response.status === 'error') {
-        fail(new Error(response.mes || 'Tên tài khoản hoặc mật khẩu không đúng.'));
-        return;
-      }
+      if (response.status === 'error') { fail(new Error(response.mes)); return; }
       const code = response.data?.RE_LOGIN_CODE;
-      if (!code) {
-        fail(new Error('Máy chủ trả LOGIN thành công nhưng thiếu RE_LOGIN_CODE.'));
-        return;
-      }
-
+      if (!code) { fail(new Error('Máy chủ trả LOGIN thành công nhưng thiếu RE_LOGIN_CODE.')); return; }
+      if (version !== authVersion || manualLogout) { fail(new Error('Phiên đăng nhập đã bị hủy.')); return; }
       settled = true;
-      cleanupPending();
-      authenticatedSocket = socket;
-      setConnectionState('connected');
+      cleanup();
       lastSession = { username: input.username, reLoginCode: code };
-      socket.onclose = () => {
-        if (authenticatedSocket === socket) {
-          authenticatedSocket = null;
-          if (!manualLogout) { setConnectionState('offline'); void reconnectSession(1, options.onDisconnected); }
-        }
-      };
-      resolve({ username: input.username, reLoginCode: code });
+      saveLoginSession(lastSession);
+      bindAuthenticatedSocket(socket);
+      setConnectionState('connected');
+      resolve(lastSession);
     };
-
-    socket.onerror = () => {
-      fail(new Error('Không thể kết nối tới máy chủ WebSocket. Kiểm tra mạng và địa chỉ WSS.'));
-    };
-    socket.onclose = () => {
-      fail(new Error('Máy chủ đóng kết nối trước khi xác nhận đăng nhập.'));
-    };
+    socket.onerror = () => fail(new Error('Không thể kết nối tới máy chủ WebSocket. Kiểm tra mạng và địa chỉ WSS.'));
+    socket.onclose = () => fail(new Error('Máy chủ đóng kết nối trước khi xác nhận đăng nhập.'));
   });
 }
 
-/** RE_LOGIN: backoff capped at 30 seconds. A transient network outage must not log the user out. */
-async function reconnectSession(attempt: number, onDisconnected?: () => void): Promise<void> {
-  if (manualLogout || !lastSession || reconnecting) return;
-  reconnecting = true;
-  setConnectionState('reconnecting');
-  const session = lastSession;
-  let invalidSession = false;
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const socket = new WebSocket(WS_URL);
-      let completed = false;
-      const fail = (error: Error) => {
-        if (completed) return;
-        completed = true;
-        clearTimeout(timeout);
-        if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) socket.close();
-        reject(error);
-      };
-      const timeout = setTimeout(() => fail(new Error('RE_LOGIN timed out')), 12000);
-      socket.onopen = () => {
-        try { socket.send(JSON.stringify({ action: 'onchat', data: { event: 'RE_LOGIN', data: { user: session.username, code: session.reLoginCode } } })); }
-        catch { fail(new Error('Cannot send RE_LOGIN')); }
-      };
-      socket.onmessage = message => {
-        if (typeof message.data !== 'string') return;
-        try {
-          const packet = JSON.parse(message.data);
-          if (packet.event !== 'RE_LOGIN') return;
-          if (packet.status !== 'success' || !packet.data?.RE_LOGIN_CODE) {
-            invalidSession = packet.status === 'error' && /expired|invalid|not login|wrong|hết hạn/i.test(String(packet.mes || ''));
-            fail(new Error('RE_LOGIN rejected')); return;
-          }
-          completed = true;
-          clearTimeout(timeout);
-          lastSession = { username: session.username, reLoginCode: String(packet.data.RE_LOGIN_CODE) };
-          authenticatedSocket = socket;
-          socket.onmessage = null;
-          socket.onerror = null;
-          socket.onclose = () => {
-            if (authenticatedSocket === socket && !manualLogout) {
-              authenticatedSocket = null;
-              setConnectionState('offline');
-              void reconnectSession(1, onDisconnected);
-            }
-          };
-          setConnectionState('connected');
-          window.dispatchEvent(new Event('lyra:reconnected'));
-          resolve();
-        } catch { fail(new Error('Malformed RE_LOGIN response')); }
-      };
-      socket.onerror = () => fail(new Error('Connection unavailable'));
-      socket.onclose = () => fail(new Error('Connection closed'));
-    });
-  } catch {
-    if (manualLogout || !lastSession) return;
-    if (invalidSession) {
-      lastSession = null;
-      setConnectionState('signed-out');
-      onDisconnected?.();
-      return;
-    }
-    // Retry without forcing logout for temporary 521/network failures.
-    setConnectionState('offline');
-    const delay = Math.min(30000, 1000 * 2 ** Math.min(attempt, 5));
-    reconnectTimer = setTimeout(() => { void reconnectSession(attempt + 1, onDisconnected); }, delay);
-  } finally {
-    reconnecting = false;
-  }
+/** Cancellable delay between retries. No infinite reconnect loop. */
+function retryDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) { reject(new Error('Aborted')); return; }
+    const finish = () => { signal.removeEventListener('abort', onAbort); resolve(); };
+    const timer = setTimeout(finish, ms);
+    const onAbort = () => { clearTimeout(timer); signal.removeEventListener('abort', onAbort); reject(new Error('Aborted')); };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
-/** Explicit retry from the UI. Does not create a second socket while reconnecting. */
+/**
+ * Restores a cached session on F5 OR recovers a dropped authenticated socket.
+ * The server remains authoritative: never show chat before RE_LOGIN: success.
+ */
+export function restoreLoginSession(options: { onDisconnected?: () => void } = {}): Promise<LoginSession | null> {
+  if (options.onDisconnected) disconnectCallback = options.onDisconnected;
+  if (getAuthenticatedSocket() && lastSession) return Promise.resolve(lastSession);
+  if (recoveryPromise) return recoveryPromise;
+  if (manualLogout && !readLoginSession()) return Promise.resolve(null);
+  const initial = lastSession ?? readLoginSession();
+  if (!initial) { setConnectionState('signed-out'); return Promise.resolve(null); }
+  manualLogout = false;
+  lastSession = initial;
+  const version = authVersion;
+  const abortController = new AbortController();
+  recoveryAbort = abortController;
+  setConnectionState('reconnecting');
+
+  const task = (async (): Promise<LoginSession | null> => {
+    for (let attempt = 1; attempt <= MAX_RELOGIN_ATTEMPTS; attempt++) {
+      if (version !== authVersion || abortController.signal.aborted) return null;
+      try {
+        const result = await reLoginOnce(WS_URL, lastSession!, { signal: abortController.signal });
+        if (version !== authVersion || abortController.signal.aborted) {
+          result.socket.close();
+          return null;
+        }
+        lastSession = result.session;
+        saveLoginSession(result.session); // rotate: NEVER retain previous RE_LOGIN_CODE
+        bindAuthenticatedSocket(result.socket);
+        setConnectionState('connected');
+        if (typeof window !== 'undefined') window.dispatchEvent(new Event('lyra:reconnected'));
+        return result.session;
+      } catch (reason) {
+        if (version !== authVersion || abortController.signal.aborted) return null;
+        if (reason instanceof ReLoginRejectedError) break; // Expired / invalid / no new code.
+        if (attempt < MAX_RELOGIN_ATTEMPTS) {
+          setConnectionState('offline');
+          try { await retryDelay(1000 * 2 ** (attempt - 1), abortController.signal); }
+          catch { return null; }
+          setConnectionState('reconnecting');
+        }
+      }
+    }
+    if (version === authVersion && !abortController.signal.aborted) invalidateSession();
+    return null;
+  })();
+  const pending = task.finally(() => {
+    if (recoveryPromise === pending) recoveryPromise = null;
+    if (recoveryAbort === abortController) recoveryAbort = null;
+  });
+  recoveryPromise = pending;
+  return pending;
+}
+
+/** Retry button; only works while disconnected, never opens parallel sockets. */
 export function retryConnectionNow(onDisconnected?: () => void): void {
-  if (!lastSession || manualLogout || reconnecting || getConnectionState() === 'connected') return;
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-  reconnectTimer = null;
-  void reconnectSession(1, onDisconnected);
+  if (getConnectionState() === 'connected' || recoveryPromise) return;
+  void restoreLoginSession({ onDisconnected });
 }

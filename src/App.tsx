@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Info, RefreshCw, Wifi, WifiOff, X, ClipboardList } from 'lucide-react';
 import { useServerChats } from './hooks/useServerChats';
-import { disconnectLoginSession, retryConnectionNow, type LoginSession } from './services/loginService';
+import { disconnectLoginSession, restoreLoginSession, retryConnectionNow, type LoginSession } from './services/loginService';
 import { getChatDiagnostics, sendChatEvent } from './services/chatSocket';
 import { getConnectionState, subscribeConnectionState } from './services/connectionHealth';
 import AuthPage from './pages/AuthPage';
@@ -70,8 +70,20 @@ function LoggedIn({ session, onExit }: {session:LoginSession;onExit:()=>void}) {
 }
 export default function App(){
   const [session,setSession]=useState<LoginSession|null>(null);
+  const [restoring,setRestoring]=useState(true);
   const [notice,setNotice]=useState('');
+  useEffect(()=>{
+    let active=true;
+    void restoreLoginSession().then(recovered=>{
+      if(!active)return;
+      if(recovered){setSession(recovered);setNotice('');window.history.replaceState(null,'','/');}
+      else if(window.location.pathname!=='/register'){window.history.replaceState(null,'','/login');}
+      setRestoring(false);
+    }).catch(()=>{if(active){setRestoring(false);setNotice('Không thể khôi phục phiên. Vui lòng đăng nhập lại.');}});
+    return ()=>{active=false;};
+  },[]);
   const handleExit=useCallback(()=>{setSession(null);setNotice('Phiên đăng nhập đã kết thúc. Vui lòng đăng nhập lại nếu cần.');window.history.replaceState(null,'','/login');},[]);
+  if(restoring)return <div className="auth-page"><div className="auth-card" role="status" aria-live="polite"><h1>AppChat</h1><p>Đang kiểm tra và khôi phục phiên đăng nhập…</p></div></div>;
   if(!session)return <AuthPage notice={notice} onDisconnected={()=>{setSession(null);setNotice('Không thể khôi phục phiên WebSocket. Vui lòng đăng nhập lại.');}} onLogin={value=>{setSession(value);setNotice('');window.history.replaceState(null,'','/');}}/>;
   return <LoggedIn session={session} onExit={handleExit}/>;
 }

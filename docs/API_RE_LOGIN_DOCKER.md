@@ -1,73 +1,61 @@
-# AppChat — Giai đoạn 3: API `RE_LOGIN` (WebSocket) + Docker
+# AppChat — API số 3: RE_LOGIN (hoàn thiện tích hợp Frontend)
 
-## 1. Phạm vi
+**Nguồn chuẩn:** `chat_API.xlsx` → sheet `0Sheet1` → dòng `RE_LOGIN` (số 4).
+**Phạm vi:** khôi phục phiên WebSocket sau khi tải lại trang hoặc mất kết nối. Không thay đổi giao thức Backend.
+**Trạng thái:** đã triển khai trong React + có unit/integration tests giả lập WebSocket; **chưa xác nhận E2E trên máy chủ thật của giảng viên**.
 
-Tài liệu dựa trên `chat_API.xlsx`, sheet `0Sheet1`, dòng 4 (`RE_LOGIN`). API #1 `REGISTER` và #2 `LOGIN` được giữ nguyên. Đây là **khung đã tích hợp vào luồng xác thực**, chưa xác nhận giao tiếp trực tiếp với Backend thật.
+## 1. Hợp đồng từ file Excel
 
-- Khi `LOGIN` thành công, lưu `{username, reLoginCode}` vào **sessionStorage** của tab (không lưu mật khẩu).
-- Khi tải lại trang, nếu tab còn mã phiên, mở WebSocket mới và gửi `RE_LOGIN`.
-- Khi WebSocket đã xác thực bị đóng ngoài ý muốn, thử khôi phục với mã phiên hiện tại.
-- Khi nhận `RE_LOGIN: success`, **thay mã cũ bằng `RE_LOGIN_CODE` mới**, giữ socket đang mở.
-- Nếu máy chủ trả lỗi hết hạn, quay về màn hình LOGIN và xóa mã đã lưu. Khi gặp lỗi mạng, thử tối đa 3 lần (chờ 1 giây, 2 giây giữa các lần).
-- Nút **Đóng phiên trên thiết bị** xóa `sessionStorage` và đóng socket; **không gửi API #4 `LOGOUT`** (chưa triển khai).
-- Chat, danh bạ và nhóm vẫn dùng dữ liệu mẫu phía Frontend, chưa gọi các API chat.
-
-## 2. Hợp đồng API theo Excel
-
-**URL:** `wss://chat.longapp.io.vn/chat/chat`
+WebSocket: `wss://chat.longapp.io.vn/chat/chat`
 
 Request:
 
 ```json
-{
-  "action": "onchat",
-  "data": {
-    "event": "RE_LOGIN",
-    "data": {
-      "user": "long",
-      "code": "nlu_2055829137"
-    }
-  }
-}
+{"action":"onchat","data":{"event":"RE_LOGIN","data":{"user":"long","code":"nlu_2055829137"}}}
 ```
 
 Response thành công:
 
 ```json
-{
-  "status": "success",
-  "event": "RE_LOGIN",
-  "data": { "RE_LOGIN_CODE": "nlu_3928172635" }
-}
+{"status":"success","event":"RE_LOGIN","data":{"RE_LOGIN_CODE":"nlu_3928172635"}}
 ```
 
 Response hết hạn:
 
 ```json
-{
-  "status": "error",
-  "event": "RE_LOGIN",
-  "mes": "Re-Login error, session expired!"
-}
+{"status":"error","event":"RE_LOGIN","mes":"Re-Login error, session expired!"}
 ```
 
-Theo mô tả trong Excel, máy chủ giữ phiên trong **2 giờ**, nhưng thời gian thực tế và khả năng khôi phục phụ thuộc Backend. Frontend không được tự coi mã cũ còn hiệu lực, không đoán hoặc tự tạo `RE_LOGIN_CODE`.
+Theo tài liệu, máy chủ có phiên khôi phục trong khoảng **2 giờ**. Chỉ máy chủ quyết định mã còn hiệu lực; không tự sinh `RE_LOGIN_CODE` ở Frontend.
 
-## 3. Các file liên quan
+## 2. Đã triển khai trong source này
 
-| File | Chức năng |
+| Vị trí | Nhiệm vụ |
 |---|---|
-| `src/services/reLoginProtocol.ts` | Xây dựng request JSON, đọc response RE_LOGIN |
-| `src/services/reLoginService.ts` | Mở socket mới, gửi RE_LOGIN, retry tối đa 3 lần và nhận mã mới |
-| `src/services/sessionStore.ts` | Lưu, đọc, xóa mã trong `sessionStorage` |
-| `src/services/loginService.ts` | LOGIN lưu mã ban đầu; gắn socket dùng chung, đóng và xóa phiên khi chủ động kết thúc |
-| `src/App.tsx` | Khôi phục khi reload/ngắt kết nối, màn hình chờ, xử lý hết hạn |
-| `tests/reLoginProtocol.test.mjs` | Kiểm tra request/response theo tài liệu |
-| `tests/sessionStore.test.mjs` | Kiểm tra lưu, thay và xóa mã phiên |
+| `src/services/reLoginProtocol.ts` | Tạo đúng JSON RE_LOGIN, phân tích `success/error`, không chấp nhận dữ liệu khác event |
+| `src/services/reLoginService.ts` | Mở socket mới, chờ RE_LOGIN, timeout/hủy yêu cầu, đóng socket lỗi và giữ socket nếu thành công |
+| `src/services/sessionStore.ts` | Lưu username + mã phiên trong `sessionStorage` của tab, thay mã sau mỗi thành công, tự bỏ bản ghi cũ hơn 2 giờ |
+| `src/services/loginService.ts` | Sau LOGIN lưu code; khi F5 hay bị close thì gọi RE_LOGIN, tối đa 3 lần cho lỗi mạng; không thử lại khi server từ chối mã; tránh hai socket song song |
+| `src/App.tsx` | Hiển thị trạng thái đang xác minh phiên, không mở chat trước khi server xác nhận, về `/login` nếu hết hạn |
+| `tests/reLoginProtocol.test.mjs` | Kiểm thử JSON và response theo Excel |
+| `tests/reLoginService.test.mjs` | Kiểm thử WebSocket giả lập, từ chối mã và hủy yêu cầu |
+| `tests/sessionStore.test.mjs` | Kiểm thử lưu mã, thay mã, hết hạn, xóa phiên |
+| `tests/reLoginIntegration.test.mjs` | Kiểm thử tích hợp LOGIN → lưu mã, RE_LOGIN sau F5, tự hồi phục socket, expired và đóng phiên |
 
-## 4. Chạy và kiểm tra trong WebStorm (Windows)
+**Luồng xử lý:**
 
-Trong thư mục chứa `package.json`:
+1. `LOGIN` trả `RE_LOGIN_CODE` → lưu vào `sessionStorage` (không lưu password).
+2. Tải lại trang (`F5`) → trạng thái **Đang kiểm tra và khôi phục phiên** → đọc mã còn hạn trong tab → mở socket mới → gửi `RE_LOGIN`.
+3. `RE_LOGIN: success` + `RE_LOGIN_CODE` mới → cập nhật storage, gắn lại socket chung, thông báo các hook chat tái đăng ký và tải lại danh sách hội thoại.
+4. Mất WebSocket → thử khôi phục tương tự. Nếu mất mạng, thử tối đa **3 lần tổng cộng** (đợi khoảng 1 giây rồi 2 giây giữa các lần thử).
+5. `RE_LOGIN: error`, hoặc `success` thiếu mã mới → xóa mã và quay về màn hình `LOGIN` ngay (không retry sai mã).
+6. Người dùng đóng phiên → dừng các lần thử đang chờ, xóa mã và đóng socket; F5 không được tự khôi phục.
+
+**Ghi chú API #4:** Source tải lên đã có nút đăng xuất gửi sự kiện `LOGOUT`; API số 3 không thêm xác nhận ACK `LOGOUT` hoặc kiểm thử API #4. Không đánh đồng việc đóng kết nối trên trình duyệt với việc máy chủ đã xác nhận đăng xuất.
+
+## 3. Kiểm tra trên WebStorm (Windows)
+
+Tại thư mục AppChat chứa `package.json`:
 
 ```powershell
 npm ci
@@ -83,27 +71,28 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Mở `http://localhost:8088/login` nếu Compose đang ánh xạ cổng 8088.
+Truy cập `http://localhost:8088/login` (cổng mặc định theo `docker-compose.yml`). Khi sửa code React, phải build lại image bằng `docker compose up -d --build`.
 
-## 5. Các test case thủ công cần thực hiện với Backend thật
+## 4. Kịch bản E2E với máy chủ thật (chưa xác nhận)
 
-| Mã | Thao tác | Kết quả mong đợi |
+| ID | Thao tác | Kết quả đúng |
 |---|---|---|
-| RL-01 | LOGIN tài khoản đúng, F5 khi đang chat | Gửi RE_LOGIN với mã đã nhận từ LOGIN, nhận success và quay lại chat |
-| RL-02 | Mất kết nối ngắn, máy chủ còn cho khôi phục | Tự gọi RE_LOGIN, cập nhật mã mới, ở lại chat |
-| RL-03 | Backend trả `session expired!` | Xóa mã, về màn hình LOGIN, hiển thị lý do |
-| RL-04 | Backend trả success thiếu mã mới | Không chấp nhận phiên, về LOGIN |
-| RL-05 | Đứt mạng lâu | Tối đa 3 lần thử, không lặp vô hạn, về LOGIN nếu đều thất bại |
-| RL-06 | Avatar → Đóng phiên trên thiết bị, sau đó F5 | Không tự RE_LOGIN; vẫn ở màn hình LOGIN |
-| RL-07 | Reload trên tab mới không cùng sessionStorage | Yêu cầu LOGIN, không tự mượn phiên từ tab khác |
-| RL-08 | Docker build và truy cập localhost:8088 | Container Up, form LOGIN/REGISTER và chat hiển thị đúng |
+| RL-01 | Đăng nhập bằng username/password thật, F5 | Sau khi nhận `RE_LOGIN: success`, trở lại chat, **không** nhập password lần nữa |
+| RL-02 | F5 lần hai sau lần khôi phục thành công | Request dùng **mã mới**, không lặp mã cũ |
+| RL-03 | Ngắt mạng/đóng WebSocket bất ngờ rồi nối lại | Tự gọi RE_LOGIN, socket chat mới hoạt động |
+| RL-04 | Server trả `session expired!` | Xóa mã lưu, chuyển `/login` |
+| RL-05 | Máy chủ trả success thiếu code | Không cho vào chat, về `/login` |
+| RL-06 | Mạng không khả dụng | Tối đa 3 lần kết nối, sau đó yêu cầu đăng nhập lại |
+| RL-07 | Avatar → Đăng xuất → F5 | Không tự khôi phục phiên đã đóng |
+| RL-08 | Docker build và chạy container | `appchat-frontend` ở trạng thái Up, dùng được trang đăng nhập |
 
-**Lưu ý:** Để xem Frames trong Chrome: F12 → Network → WS → Messages. Che toàn bộ password và `RE_LOGIN_CODE` trong ảnh chụp báo cáo. Đừng dùng mã ví dụ trong Excel như mã hợp lệ thực tế.
+**Cách kiểm tra:** Chrome `F12` → Network → WS → Messages. Chỉ kiểm tra tên sự kiện và trạng thái. **Không chụp hoặc chia sẻ mật khẩu và mã `RE_LOGIN_CODE`**, vì mã này cho phép khôi phục phiên.
 
-## 6. Giới hạn và bảo mật
+## 5. Hạn chế và bảo mật
 
-- `sessionStorage` có thể bị JavaScript cùng origin đọc, nên còn rủi ro XSS. Với sản phẩm triển khai rộng rãi, nên thỏa thuận thêm với bên cung cấp Backend về phiên bảo mật (ví dụ cookie HttpOnly qua BFF hoặc giải pháp lưu token an toàn tương đương).
-- `sessionStorage` thường sống trong phạm vi **một tab** và còn khi tải lại tab; không phải bộ lưu trữ vĩnh viễn và không đồng nghĩa phiên server kéo dài vô hạn.
-- Cơ chế khôi phục bắt đầu khi browser nhận sự kiện WebSocket `close`; hệ điều hành mất mạng có thể không tạo sự kiện này ngay. Heartbeat/ping cần thỏa thuận giao thức với Backend, không tự phát sinh gói tin không được mô tả trong Excel.
-- Không gửi `RE_LOGIN` trong lúc một socket đã xác thực còn hoạt động bình thường.
-- API #4 `LOGOUT`, các API chat và kiểm thử end-to-end trên máy chủ thật vẫn là hạng mục tiếp theo.
+- `sessionStorage` là phương án triển khai Frontend cho môn học: script cùng origin có thể đọc mã (rủi ro XSS). Hệ thống production nên thiết kế phiên bảo mật hơn với bên cung cấp Backend.
+- `sessionStorage` áp dụng theo tab/phiên trang; hành vi nhân bản tab khác nhau theo trình duyệt. Không coi đó là cơ chế phiên đa thiết bị.
+- `sessionStorage` 2 giờ là biện pháp client để loại mã cũ; **Backend vẫn quyết định** mã hợp lệ hay không.
+- Trong mạng chập chờn, WebSocket có thể chưa phát `close` ngay. Không tự gửi heartbeat ngoài đặc tả API.
+- Sau 3 lần thử không kết nối được, ứng dụng yêu cầu đăng nhập lại. Cơ chế này có thể được điều chỉnh nếu nhóm muốn giữ UI offline lâu hơn.
+- Tests giả lập không chứng minh máy chủ production hỗ trợ hoặc có thể khôi phục thành công tại thời điểm kiểm thử.
