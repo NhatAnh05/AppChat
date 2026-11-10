@@ -1,5 +1,5 @@
 /** Public connection states without exposing the RE_LOGIN_CODE. */
-export type ChatConnectionState = 'connected' | 'reconnecting' | 'offline' | 'signed-out';
+export type ChatConnectionState = 'connected' | 'reconnecting' | 'offline' | 'signing-out' | 'signed-out';
 type Listener = (state: ChatConnectionState) => void;
 const listeners = new Set<Listener>();
 let current: ChatConnectionState = 'signed-out';

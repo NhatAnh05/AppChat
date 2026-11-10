@@ -21,6 +21,7 @@ type Props = {
   settings: LocalChatSettings;
   onSettingsChange: (settings: LocalChatSettings) => void;
   onLogout: () => void;
+  loggingOut?: boolean;
   onClose: () => void;
 };
 const menu: { id: Tab; title: string; subtitle: string; icon: typeof UserRound }[] = [
@@ -29,15 +30,15 @@ const menu: { id: Tab; title: string; subtitle: string; icon: typeof UserRound }
   { id: 'security', title: 'Bảo mật', subtitle: 'Phiên đăng nhập và quyền riêng tư', icon: ShieldCheck },
 ];
 
-export default function AccountSettingsDialog({ username, settings, onSettingsChange, onLogout, onClose }: Props) {
+export default function AccountSettingsDialog({ username, settings, onSettingsChange, onLogout, loggingOut = false, onClose }: Props) {
   const [tab, setTab] = useState<Tab>('profile');
   const [copied, setCopied] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   useEffect(() => {
-    const onEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    const onEscape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !loggingOut) onClose(); };
     window.addEventListener('keydown', onEscape);
     return () => window.removeEventListener('keydown', onEscape);
-  }, [onClose]);
+  }, [onClose, loggingOut]);
   const change = (key: keyof LocalChatSettings, checked: boolean) => {
     onSettingsChange({ ...settings, [key]: checked });
   };
@@ -45,10 +46,10 @@ export default function AccountSettingsDialog({ username, settings, onSettingsCh
     try { await navigator.clipboard.writeText(username); setCopied(true); }
     catch { setCopied(false); }
   };
-  return <div className="ly-account-dialog" role="dialog" aria-modal="true" aria-labelledby="ly-account-title">
+  return <div className="ly-account-dialog" role="dialog" aria-modal="true" aria-labelledby="ly-account-title" aria-busy={loggingOut}>
     <header className="ly-account-header">
       <div><span className="eyebrow">LYRACHAT / CÀI ĐẶT</span><h2 id="ly-account-title">Cài đặt tài khoản</h2><p>Quản lý tài khoản và trải nghiệm trò chuyện</p></div>
-      <button type="button" className="ly-account-close" onClick={onClose} aria-label="Đóng cài đặt"><X size={19}/></button>
+      <button type="button" className="ly-account-close" onClick={onClose} disabled={loggingOut} aria-label="Đóng cài đặt"><X size={19}/></button>
     </header>
     <div className="ly-account-layout">
       <nav className="ly-account-nav" aria-label="Danh mục cài đặt">
@@ -76,7 +77,7 @@ export default function AccountSettingsDialog({ username, settings, onSettingsCh
           <div className="ly-account-help"><Info size={17}/><p>Máy chủ chưa cung cấp lệnh đổi mật khẩu hay xác thực hai bước. LyraChat sẽ không giả lập những thay đổi này.</p></div>
         </>}
         <div className="ly-account-logout-area">
-          {!confirmLogout ? <button type="button" className="ly-account-logout" onClick={()=>setConfirmLogout(true)}><LogOut size={18}/>Đăng xuất khỏi tài khoản</button> : <div className="ly-account-confirm"><strong>Bạn có chắc muốn đăng xuất?</strong><span>Phiên WebSocket hiện tại sẽ kết thúc.</span><div><button type="button" onClick={()=>setConfirmLogout(false)}>Hủy</button><button type="button" onClick={onLogout}>Đăng xuất</button></div></div>}
+          {!confirmLogout ? <button type="button" className="ly-account-logout" onClick={()=>setConfirmLogout(true)}><LogOut size={18}/>Đăng xuất khỏi tài khoản</button> : <div className="ly-account-confirm"><strong>Bạn có chắc muốn đăng xuất?</strong><span>Phiên WebSocket hiện tại sẽ kết thúc.</span><div><button type="button" disabled={loggingOut} onClick={()=>setConfirmLogout(false)}>Hủy</button><button type="button" disabled={loggingOut} onClick={onLogout}>{loggingOut ? 'Đang đăng xuất…' : 'Đăng xuất'}</button></div></div>}
         </div>
       </div>
     </div>

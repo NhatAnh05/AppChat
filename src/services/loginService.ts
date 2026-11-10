@@ -14,19 +14,39 @@ export interface LoginSession extends SavedLoginSession {}
 let authenticatedSocket: WebSocket | null = null;
 let lastSession: LoginSession | null = null;
 let manualLogout = false;
+let signingOut = false;
 let authVersion = 0;
 let recoveryPromise: Promise<LoginSession | null> | null = null;
 let recoveryAbort: AbortController | null = null;
 let disconnectCallback: (() => void) | undefined;
 
 export function getAuthenticatedSocket(): WebSocket | null {
-  return authenticatedSocket?.readyState === WebSocket.OPEN ? authenticatedSocket : null;
+  return !signingOut && authenticatedSocket?.readyState === WebSocket.OPEN ? authenticatedSocket : null;
 }
 
-/** API #4 LOGOUT is out of scope here: clear client-side session and close socket. */
+/**
+ * Begin API #4 LOGOUT on the current socket; block all further sends and RE_LOGIN.
+ * The caller must await the LOGOUT ACK before disconnectLoginSession().
+ */
+export function beginLogoutSession(): WebSocket | null {
+  if (signingOut) return null;
+  const socket = getAuthenticatedSocket();
+  signingOut = true;
+  manualLogout = true;
+  authVersion++;
+  recoveryAbort?.abort();
+  recoveryAbort = null;
+  recoveryPromise = null;
+  disconnectCallback = undefined;
+  setConnectionState('signing-out');
+  return socket;
+}
+
+/** Clear the local session, cancel pending recovery, and close the socket. */
 export function disconnectLoginSession(): void {
   authVersion++;
   manualLogout = true;
+  signingOut = false;
   recoveryAbort?.abort();
   recoveryAbort = null;
   recoveryPromise = null;
@@ -141,6 +161,7 @@ function retryDelay(ms: number, signal: AbortSignal): Promise<void> {
  */
 export function restoreLoginSession(options: { onDisconnected?: () => void } = {}): Promise<LoginSession | null> {
   if (options.onDisconnected) disconnectCallback = options.onDisconnected;
+  if (signingOut) return Promise.resolve(null);
   if (getAuthenticatedSocket() && lastSession) return Promise.resolve(lastSession);
   if (recoveryPromise) return recoveryPromise;
   if (manualLogout && !readLoginSession()) return Promise.resolve(null);
