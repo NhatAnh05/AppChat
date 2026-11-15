@@ -1,0 +1,671 @@
+:root {
+  font-family: Inter, Arial, sans-serif;
+  color: #0f172a;
+  background: #f8fafc;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
+  font-weight: 400;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input { font: inherit; }
+button { color: inherit; }
+#root { min-height: 100vh; }
+
+.app-shell {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  min-height: 500px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.conversation-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.conversation-panel .chat-window {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-window {
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+}
+
+.chat-window-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  min-height: 76px;
+  padding: 16px 24px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+.chat-window-header .chat-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: #334155;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.chat-header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.chat-header-info h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.chat-header-info span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.chat-window-empty {
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
+.empty-chat {
+  padding: 24px;
+  text-align: center;
+}
+
+.empty-chat-icon {
+  margin-bottom: 16px;
+  font-size: 48px;
+}
+
+.empty-chat h2 {
+  margin: 0 0 8px;
+  color: #1e293b;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.empty-chat p {
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.message-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+  background: #f8fafc;
+}
+
+.message-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.message-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.message-list::-webkit-scrollbar-thumb {
+  border-radius: 10px;
+  background: #cbd5e1;
+}
+
+.message-row {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.message-row.sent {
+  justify-content: flex-end;
+}
+
+.message-row.received {
+  justify-content: flex-start;
+}
+
+.message-content-wrap {
+  min-width: 0;
+  max-width: 78%;
+}
+
+.message-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0 0 5px 38px;
+  color: #475569;
+  font-size: 11px;
+}
+
+.message-row.sent .message-meta {
+  justify-content: flex-end;
+  margin-right: 0;
+  margin-left: 0;
+}
+
+.message-row.sent .message-body {
+  justify-content: flex-end;
+}
+
+.message-sender-name {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.message-time {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.message-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.message-bubble {
+  max-width: 100%;
+  min-width: 0;
+  padding: 10px 14px;
+  border-radius: 16px;
+  overflow-wrap: anywhere;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 5%);
+}
+
+.message-sender-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #e0e7ff;
+  color: #4338ca;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.message-row.sent .message-bubble {
+  border-bottom-right-radius: 4px;
+  background: #6366f1;
+  color: #ffffff;
+}
+
+.message-row.received .message-bubble {
+  border: 1px solid #e2e8f0;
+  border-bottom-left-radius: 4px;
+  background: #ffffff;
+  color: #1f2937;
+}
+
+.message-content {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.empty-messages {
+  margin: auto;
+  padding: 20px;
+  color: #94a3b8;
+  font-size: 14px;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.history-load-more {
+  align-self: center;
+  margin: 0 auto 16px;
+  padding: 8px 13px;
+  border: 1px solid #dbe1ea;
+  border-radius: 18px;
+  background: #fff;
+  color: #4f46e5;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.history-load-more:disabled,
+.history-error button:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+.history-error {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 auto 14px;
+  color: #b91c1c;
+  font-size: 12px;
+}
+
+.history-error button {
+  padding: 5px 9px;
+  border: 1px solid #fecaca;
+  border-radius: 7px;
+  background: #fff;
+  color: #b91c1c;
+  cursor: pointer;
+}
+
+.message-input-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  width: 100%;
+  padding: 16px 24px;
+  border-top: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+.message-input {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 16px;
+  border: 1px solid #dbe1ea;
+  border-radius: 12px;
+  outline: none;
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.message-input::placeholder {
+  color: #94a3b8;
+}
+
+.message-input {
+  border-color: #6366f1;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgb(99 102 241 / 10%);
+}
+
+.send-button {
+  flex-shrink: 0;
+  padding: 12px 22px;
+  border: none;
+  border-radius: 12px;
+  background: #6366f1;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.send-button:hover:not(:disabled) {
+  background: #4f46e5;
+}
+
+.send-button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.send-button:disabled {
+  background: #a5a6f6;
+  color: #f8fafc;
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+
+@media (max-width: 768px) {
+  .chat-window-header {
+    min-height: 68px;
+    padding: 12px 16px;
+  }
+
+  .message-list {
+    padding: 16px;
+  }
+
+  .message-input-container {
+    gap: 8px;
+    padding: 12px 16px;
+  }
+
+  .message-bubble {
+    max-width: 85%;
+  }
+
+  .send-button {
+    padding: 12px 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .message-list {
+    padding: 12px;
+  }
+
+  .message-input-container {
+    padding: 10px 12px;
+  }
+
+  .message-input {
+    padding: 11px 12px;
+  }
+
+  .message-bubble {
+    max-width: 90%;
+  }
+}
+
+/* Trang đăng nhập / đăng ký: xanh ngọc trầm, nền bạc hà nhạt theo ảnh tham chiếu. */
+.login-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  width: 100%;
+  padding: 24px;
+  background: radial-gradient(ellipse at center, #ffffff 16%, #f8fcfa 43%, #e4f4ef 100%);
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 496px;
+  padding: 58px 82px 64px;
+  background: #fff;
+  border: 1px solid #e3eaf0;
+  border-radius: 17px;
+  box-shadow: 0 16px 46px rgba(25, 78, 66, .10);
+}
+
+.login-form h1 {
+  margin: 0;
+  color: #205c4d;
+  font-size: 36px;
+  font-weight: 750;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.login-form > p:not(.login-error):not(.register-success) {
+  margin: -2px 0 12px;
+  color: #7486a0;
+  font-size: 14px;
+  text-align: center;
+}
+
+.login-form label {
+  margin-bottom: -4px;
+  color: #1b304c;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.login-form input {
+  width: 100%;
+  min-height: 44px;
+  padding: 11px 13px;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  outline: none;
+  background: #e8f0fc;
+  color: #192b45;
+  font-size: 14px;
+  transition: border-color .2s, box-shadow .2s;
+}
+
+.login-form input:focus {
+  border-color: #2c7661;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(38, 100, 80, .12);
+}
+
+.login-form button[type="submit"] {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 7px;
+  padding: 11px 16px;
+  border: 0;
+  border-radius: 9px;
+  background: #245d4e;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background .2s;
+}
+
+.login-form button[type="submit"]:hover { background: #194b3f; }
+.login-form button[type="submit"]:disabled { opacity: .65; cursor: not-allowed; }
+.login-form .login-error { margin: 0; color: #dc2626; font-size: 13px; text-align: left; }
+.login-form small { color: #7486a0; font-size: 12px; text-align: center; }
+
+.forgot-password { margin-top: -2px; }
+.forgot-password button {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #205c4d;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.forgot-password button:hover { text-decoration: underline; }
+
+@media (max-width: 560px) {
+  .login-page { padding: 16px; }
+  .login-form { padding: 38px 28px 42px; gap: 14px; }
+  .login-form h1 { font-size: 32px; }
+}
+
+.forgot-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.forgot-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+  max-width: 450px;
+  padding: 35px;
+  box-sizing: border-box;
+  background: #ffffff;
+  border-radius: 18px;
+  box-shadow: 0 15px 40px rgba(15, 23, 42, 0.2);
+}
+
+.forgot-form h2 {
+  margin: 0;
+  color: #4f46e5;
+  font-size: 26px;
+  text-align: center;
+}
+
+.forgot-form p {
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.forgot-form label {
+  color: #334155;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.forgot-form input {
+  width: 100%;
+  padding: 14px;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  background: #f8fafc;
+  font-size: 15px;
+  outline: none;
+}
+
+.forgot-form input:focus {
+  border-color: #6366f1;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.forgot-form button[type="submit"] {
+  width: 100%;
+  margin: 0;
+  padding: 14px;
+  border: none;
+  border-radius: 9px;
+  background: #6366f1;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.forgot-form button[type="submit"]:hover {
+  background: #4f46e5;
+}
+
+.forgot-form .cancel-button {
+  width: 100%;
+  margin: 0;
+  padding: 13px;
+  border: none;
+  border-radius: 9px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.forgot-form .cancel-button:hover {
+  background: rgba(23, 64, 52, .30);
+}
+
+.forgot-form .forgot-message {
+  color: #475569;
+  font-size: 14px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.login-form button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.login-form .register-success {
+  margin: 0;
+  color: #16a34a;
+  font-size: 14px;
+  text-align: left;
+}
+
+/* Liên kết chuyển giữa Đăng nhập / Đăng ký đồng đều với dòng mô tả. */
+.login-form small {
+  color: #7486a0;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.login-form .register-back-button {
+  display: inline;
+  width: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #245d4e;
+  font: inherit;
+  font-weight: 650;
+  line-height: inherit;
+  vertical-align: baseline;
+  cursor: pointer;
+}
+
+.login-form .register-back-button:hover {
+  background: transparent;
+  color: #194b3f;
+  text-decoration: underline;
+}
+
+.login-form .register-back-button:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.login-form .register-back-button:focus-visible {
+  outline: 2px solid #245d4e;
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.search-result {
+  margin-top: 8px;
+}
+
+.search-result-label {
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+}

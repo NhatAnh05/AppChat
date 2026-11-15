@@ -1,72 +1,476 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Info, RefreshCw, X } from 'lucide-react';
-import { useServerChats } from './hooks/useServerChats';
-import { disconnectLoginSession, type LoginSession } from './services/loginService';
-import { sendChatEvent } from './services/chatSocket';
-import AuthPage from './pages/AuthPage';
-import Rail from './components/Rail';
-import Sidebar, { type Filter } from './components/Sidebar';
-import ChatPanel from './components/ChatPanel';
-import DetailsPanel from './components/DetailsPanel';
-import AccountSettingsDialog, { readChatSettings, SETTINGS_KEY } from './components/AccountSettingsDialog';
-import type { Section } from './components/Rail';
+import {useEffect, useMemo, useState} from "react";
+import {useDispatch, useSelector, useStore} from "react-redux";
+import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { ChatList } from "./components/ChatList";
+import { ContactDirectory } from "./components/ContactDirectory";
+import { Sidebar } from "./components/Sidebar";
+import { Login } from "./components/Login";
+import { Register } from "./components/Register";
+import ChatWindow from "./components/ChatWindow";
+import {clearCredentials, setCredentials,} from "./features/auth/authSlice";
+import { AuthInitializer } from "./features/auth/AuthInitializer";
+import { authService } from "./services/authService";
+import { contactService } from "./services/contactService";
+import type { UserListItem } from "./services/contactService";
+import {setContactsError, setContactsLoading, setFriends, setGroups,} from "./features/contacts/contactsSlice";
+import { addMessage, fetchPeopleChatHistory, importLocalMessages, invalidateHistory } from "./features/messages/messagesSlice";
+import { websocketService, type ApiLogEntry, type WebSocketState } from "./services/websocket";
+import type { AppDispatch, RootState } from "./store/store";
+import type { Chat } from "./types/chat";
+import type { ContactEntry } from "./types/contact";
+import "./App.css";
+import {userService} from "./services/userService.ts";
 
-type Modal = 'new' | 'create' | 'join' | 'settings' | 'call' | null;
-function LoggedIn({ session, onExit }: {session:LoginSession;onExit:()=>void}) {
-  const api = useServerChats(session.username);
-  useEffect(()=>{
-    const invalid=()=>{disconnectLoginSession();onExit();};
-    window.addEventListener('lyra:auth-expired',invalid);
-    return ()=>window.removeEventListener('lyra:auth-expired',invalid);
-  },[onExit]);
-  const [section,setSection] = useState<Section>('chats');
-  const [filter,setFilter] = useState<Filter>('all');
-  const [search,setSearch] = useState('');
-  const [selected,setSelected] = useState('');
-  const [details,setDetails] = useState(false);
-  const [mobileChat,setMobileChat] = useState(false);
-  const [modal,setModal] = useState<Modal>(null);
-  const [input,setInput] = useState('');
-  const [chatSettings,setChatSettings] = useState(readChatSettings);
-  const updateChatSettings = (value: typeof chatSettings) => { setChatSettings(value); try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(value)); } catch {/* local storage unavailable */} };
-  const [notice,setNotice] = useState('');
-  const chat=api.conversations.find(item=>item.id===selected);
-  const roomBlocked=Boolean(chat?.group && api.roomMembership[chat.id]===false);
-  const joinSelectedRoom=()=>{if(chat?.group){api.joinRoom(chat.name);setNotice('Đã gửi yêu cầu tham gia phòng. Chờ máy chủ xác nhận.');}};
-  useEffect(()=>{ if(selected)api.loadHistory(selected); },[selected]); // Lấy trang đầu khi chọn hội thoại
-  const choose=(id:string)=>{setSelected(id);setMobileChat(true);setDetails(false);};
-  const open=(type:Modal)=>{setModal(type);setInput('');setNotice('');};
-  const create=()=>{
-    const name=input.trim();if(!name)return;
-    if(modal==='new') {if (name===session.username) {setNotice('Không thể tự nhắn tin cho mình.');return;} choose(api.startPerson(name));}
-    else if(modal==='create'){api.createRoom(name);api.refresh();setNotice('Đã gửi yêu cầu tạo phòng. Đang cập nhật danh sách từ máy chủ.');return;}
-    else if(modal==='join'){api.joinRoom(name);setNotice('Đã gửi yêu cầu tham gia phòng. Chờ máy chủ xác nhận.');return;}
-    setModal(null);
-  };
-  const logout=()=>{
-    try{sendChatEvent('LOGOUT');}catch{/* kết nối đã đóng */}
-    disconnectLoginSession();onExit();
-  };
-  return <div className={`app-shell ${mobileChat?'is-mobile-chat':''} ${details?'details-open':''} ${chatSettings.compactChats?'ly-compact-chats':''}`}>
-    <Rail active={section} onChange={next=>{setSection(next);setMobileChat(false);setDetails(false);if(next==='chats')setFilter('all');}} onSettings={()=>open('settings')} onGroups={()=>{setSection('chats');setFilter('groups');open('create');}} onCalls={()=>open('call')} accountName={session.username}/>
-    <Sidebar messagePreview={chatSettings.messagePreview} conversations={api.conversations} messages={api.messages} section={section} filter={filter} search={search} onFilter={setFilter} onSearch={setSearch} selected={selected} onSelect={choose} onNewChat={()=>open('new')} onShowChat={()=>setMobileChat(true)} onUpdateChat={()=>{setNotice('API chưa hỗ trợ ghim hoặc lưu trữ trên máy chủ.');}} onRemoveChat={()=>{setNotice('API chưa hỗ trợ xóa hội thoại trên máy chủ.');}} />
-    <ChatPanel key={selected} chat={chat} roomBlocked={roomBlocked} onJoinRoom={joinSelectedRoom} messages={api.messages[selected]??[]} onSend={value=>api.sendMessage(selected,value)} onRetryMessage={messageId=>api.retryMessage(selected,messageId)} onEdit={()=>window.alert('Máy chủ chưa cung cấp API sửa tin nhắn.')} onDelete={()=>window.alert('Máy chủ chưa cung cấp API xóa tin nhắn.')} onBack={()=>setMobileChat(false)} onDetails={()=>setDetails(value=>!value)} onOpenCallPreview={()=>open('call')} onManageGroup={()=>open('join')}/>
-    {details && chat && <DetailsPanel chat={chat} onClose={()=>setDetails(false)} onManageGroup={()=>open('join')}/>}
-    {(api.error || notice || api.busy) && <div className="api-status" role="status">{api.error || notice || (api.busy?'Đang tải tin nhắn từ máy chủ…':'')} <button type="button" onClick={()=>{api.clearError();setNotice('');}}>×</button></div>}
-    <div className="api-toolbar"><button type="button" onClick={api.refresh}><RefreshCw size={15}/> Làm mới hội thoại</button>{chat?.group && !roomBlocked && <button type="button" onClick={()=>{if(window.confirm(`Rời phòng ${chat.name}?`)){api.outRoom(chat.id);setSelected('');}}}>Rời phòng</button>}{chat && <button type="button" onClick={()=>api.retryHistory(chat.id,1)}>Thử tải lại lịch sử</button>}{chat && <button type="button" onClick={()=>api.retryHistory(chat.id,2)}>Tải trang tin cũ (trang 2)</button>}{roomBlocked && <button type="button" onClick={joinSelectedRoom}>Tham gia phòng này</button>}</div>
-    {modal==='settings' && <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setModal(null);}}><AccountSettingsDialog username={session.username} settings={chatSettings} onSettingsChange={updateChatSettings} onLogout={logout} onClose={()=>setModal(null)}/></div>}
-    {modal && modal!=='settings' && <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setModal(null);}}><div className="modal" role="dialog" aria-modal="true" aria-label="Thao tác LyraChat">
-      <div className="modal-heading"><div><span className="eyebrow">LYRACHAT / WEBSOCKET</span><h2>{modal==='new'?'Tin nhắn mới':modal==='create'?'Tạo phòng chat':modal==='join'?'Tham gia phòng': 'Cuộc gọi'}</h2></div><button type="button" className="icon-button" onClick={()=>setModal(null)} aria-label="Đóng"><X size={20}/></button></div>
-      {(modal==='new'||modal==='create'||modal==='join') && <form onSubmit={e=>{e.preventDefault();create();}} className="group-form"><label className="group-name-field">{modal==='new'?'Tên username người nhận': 'Tên phòng chat'}<input autoFocus required maxLength={80} value={input} onChange={e=>setInput(e.target.value)} placeholder={modal==='new'?'Nhập username đã đăng ký':'Nhập tên phòng theo API'}/></label><p className="modal-hint"><Info size={16}/>{modal==='new'?'Nhập username thật trên server, không dùng tên liên hệ trong dữ liệu mẫu.':modal==='create'?'Người tạo phòng là chủ phòng theo quy định API.':'Bạn phải tham gia phòng trước khi gửi tin trong nhóm.'}</p>{notice && <p role="status">{notice}</p>}<div className="group-form-footer"><button type="button" className="group-cancel" onClick={()=>setModal(null)}>Hủy</button><button type="submit" className="group-submit">{modal==='new'?'Mở hội thoại':modal==='create'?'Tạo phòng':'Tham gia'}</button></div></form>}
+function mapUserToContact(item: UserListItem, type: "friend" | "group"): ContactEntry {
+    return {
+        id: item.name,
+        name: item.name,
+        initials: item.name.trim().slice(0, 2).toUpperCase(),
+        color: type === "friend" ? "#46978a" : "#5e7893",
+        detail: item.actionTime,
+        online: undefined,
+    };
+}
 
-      {modal==='call' && <p className="modal-hint">Máy chủ được cung cấp chưa có API gọi thoại/video hoặc WebRTC. Chức năng này chưa khả dụng.</p>}
-    </div></div>}
-  </div>;
+function mapContactToChat(contact: ContactEntry, kind: "people" | "group"): Chat {
+    return {
+        id: contact.id,
+        name: contact.name,
+        avatar: contact.initials,
+        avatarColor: contact.color,
+        lastMessage: "",
+        time: "",
+        online: contact.online,
+        kind,
+    };
 }
-export default function App(){
-  const [session,setSession]=useState<LoginSession|null>(null);
-  const [notice,setNotice]=useState('');
-  const handleExit=useCallback(()=>{setSession(null);setNotice('Phiên đăng nhập đã kết thúc. Vui lòng đăng nhập lại nếu cần.');window.history.replaceState(null,'','/login');},[]);
-  if(!session)return <AuthPage notice={notice} onDisconnected={()=>{setSession(null);setNotice('Không thể khôi phục phiên WebSocket. Vui lòng đăng nhập lại.');}} onLogin={value=>{setSession(value);setNotice('');window.history.replaceState(null,'','/');}}/>;
-  return <LoggedIn session={session} onExit={handleExit}/>;
+
+
+function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
+    const dispatch = useDispatch<AppDispatch>();
+    const navigate = useNavigate();
+    const store = useStore<RootState>();
+
+    const [query, setQuery] = useState("");
+    const [composeOpen, setComposeOpen] = useState(false);
+    const [composeValue, setComposeValue] = useState("");
+    const [apiLogOpen, setApiLogOpen] = useState(false);
+    const [apiLogs, setApiLogs] = useState<ApiLogEntry[]>([]);
+    const [connectionStatus, setConnectionStatus] = useState<WebSocketState>(websocketService.getStatus());
+    const [pinnedIds, setPinnedIds] = useState<string[]>(() => {
+      try { return JSON.parse(localStorage.getItem(`lyra-pins-${currentUserId}`) || "[]") as string[]; }
+      catch { return []; }
+    });
+    const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
+    const [activeSection, setActiveSection] = useState("Tin nhắn");
+    const [settingsOpen, setSettingsOpen] = useState(false);
+    const [searchingUser, setSearchingUser] = useState(false);
+    const [theme, setTheme] = useState<"light" | "dark">("light");
+
+    const friends = useSelector((state: RootState) => state.contacts.friends);
+    const groups = useSelector((state: RootState) => state.contacts.groups);
+    useEffect(() => websocketService.onStatus(setConnectionStatus), []);
+    useEffect(() => websocketService.onLog(entry => setApiLogs(current => [...current.slice(-199), entry])), []);
+    useEffect(() => localStorage.setItem(`lyra-pins-${currentUserId}`, JSON.stringify(pinnedIds)), [pinnedIds, currentUserId]);
+    const messages = useSelector((state: RootState) => state.messages.messages);
+
+    // Receive forwarded 1-1 messages; outgoing acknowledgements are handled by peopleChatService.
+    useEffect(() => websocketService.on("SEND_CHAT", (message) => {
+        if (message.status === "error") return;
+
+        const data = message.data as {
+            id?: string | number;
+            name?: string;
+            to?: string;
+            mes?: string;
+            createAt?: string;
+            type?: number | string | null;
+        } | null;
+        if (!data || typeof data.name !== "string" || typeof data.to !== "string" || typeof data.mes !== "string") return;
+        // The sender already adds the matching SEND_CHAT acknowledgement when the request resolves.
+        if (data.name.trim().toLowerCase() === currentUserId.trim().toLowerCase()) return;
+        if (data.to.trim().toLowerCase() !== currentUserId.trim().toLowerCase()) return;
+
+        const chatId = friends.find(
+            (friend) => friend.id.trim().toLowerCase() === data.name.trim().toLowerCase(),
+        )?.id ?? data.name;
+
+        dispatch(addMessage({
+            id: String(data.id ?? crypto.randomUUID()),
+            chatId,
+            senderId: data.name,
+            senderName: data.name,
+            recipientId: data.to,
+            recipientName: data.to,
+            content: data.mes,
+            createdAt: data.createAt ?? new Date().toISOString(),
+            orderAt: new Date().toISOString(),
+            type: typeof data.type === "number" ? data.type : 0,
+        }));
+    }), [currentUserId, dispatch, friends]);
+
+    // Nạp trước lịch sử trang đầu để danh sách chat có preview và thời gian ngay khi mở ứng dụng.
+    useEffect(() => {
+        friends.forEach((friend) => {
+            void dispatch(fetchPeopleChatHistory({
+                username: friend.name,
+                chatId: friend.id,
+                page: 1,
+            }));
+        });
+    }, [dispatch, friends]);
+
+    // Gộp bạn bè và nhóm thành danh sách
+    const chats = useMemo(() => {
+        const contactChats = [
+            ...friends.map(contact => mapContactToChat(contact, "people")),
+            ...groups.map(contact => mapContactToChat(contact, "group")),
+        ];
+
+        // Thêm cuộc trò chuyện vừa tìm thấy nếu chưa có trong danh sách.
+        if (selectedChat && !contactChats.some(chat => chat.id.toLowerCase() === selectedChat.id.toLowerCase())) {
+            contactChats.unshift(selectedChat);
+        }
+
+        return contactChats;
+    }, [friends, groups, selectedChat]);
+
+    const refreshUserList = async () => {
+        try {
+            const items = await contactService.getUserList();
+
+            const serverFriends = items
+                .filter(item => item.type === 0)
+                .map(item => mapUserToContact(item, "friend"));
+
+            const serverGroups = items
+                .filter(item => item.type === 1)
+                .map(item => mapUserToContact(item, "group"));
+
+            // Lấy danh sách Redux mới nhất, tránh sử dụng friends từ closure cũ.
+            const currentFriends = store.getState().contacts.friends;
+
+            const mergedFriends = [...serverFriends];
+
+            currentFriends.forEach(friend => {
+                const existed = mergedFriends.some(
+                    item => item.name.toLowerCase() === friend.name.toLowerCase()
+                );
+
+                if (!existed) {
+                    mergedFriends.push(friend);
+                }
+            });
+
+            dispatch(setFriends(mergedFriends));
+            dispatch(setGroups(serverGroups));
+
+        } catch (error) {
+            console.error("Không thể cập nhật danh sách:", error);
+        }
+    };
+
+    // Tìm tin nhắn mới nhất và lọc theo tên cuộc trò chuyện
+    const filteredChats = useMemo(() => {
+        return chats
+            .map((chat) => {
+                const latestMessage = messages
+                    .filter((message) => message.chatId === chat.id)
+                    .sort(
+                        (a, b) =>
+                            new Date(b.orderAt ?? b.createdAt).getTime() -
+                            new Date(a.orderAt ?? a.createdAt).getTime()
+                    )[0];
+
+                return {
+                    ...chat,
+                    lastMessage: latestMessage
+                        ? `${latestMessage.senderId === currentUserId ? "Bạn: " : ""}${latestMessage.content}`
+                        : "",
+                    time: latestMessage
+                        ? new Date(
+                            latestMessage.createdAt
+                        ).toLocaleTimeString("vi-VN", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                        })
+                        : "",
+                };
+            })
+            .filter((chat) =>
+                chat.name
+                    .toLocaleLowerCase()
+                    .includes(query.trim().toLocaleLowerCase())
+            );
+    }, [chats, messages, currentUserId, query]);
+
+    const handleLogout = () => {
+        try {
+            authService.logout();
+        } catch {
+            // Xóa xác thực cục bộ ngay cả khi WebSocket không khả dụng.
+        }
+
+        dispatch(clearCredentials());
+        navigate("/login", { replace: true });
+    };
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadContacts = async () => {
+            dispatch(setContactsLoading(true));
+            dispatch(setContactsError(null));
+
+            try {
+                const items = await contactService.getUserList();
+
+                if (cancelled) return;
+
+                const friends = items
+                    .filter(item => item.type === 0)
+                    .map(item => mapUserToContact(item, "friend"));
+
+                const groups = items
+                    .filter(item => item.type === 1)
+                    .map(item => mapUserToContact(item, "group"));
+
+                dispatch(setFriends(friends));
+                dispatch(setGroups(groups));
+
+            } catch (error) {
+                if (!cancelled) {
+                    dispatch(
+                        setContactsError(
+                            error instanceof Error
+                                ? error.message
+                                : "Không thể tải danh bạ"
+                        )
+                    );
+                }
+            } finally {
+                if (!cancelled) {
+                    dispatch(setContactsLoading(false));
+                }
+            }
+        };
+
+        void loadContacts();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [dispatch]);
+
+    const handleSearchUser = async (username: string) => {
+        const user = username.trim();
+
+        if (!user || searchingUser) return;
+
+        if (user.toLowerCase() === currentUserId.toLowerCase()) {
+            alert("Bạn không thể tìm chính mình.");
+            return;
+        }
+
+        setSearchingUser(true);
+
+        try {
+            const exists = await userService.checkUserExist(user);
+
+            if (!exists) {
+                alert("Không tìm thấy tài khoản.");
+                return;
+            }
+
+            let online = false;
+
+            try {
+                online = await userService.checkUserOnline(user);
+            } catch {
+                // Không lấy được trạng thái online nhưng tài khoản vẫn tồn tại.
+            }
+
+            const chat: Chat = {
+                id: user,
+                name: user,
+                avatar: user.slice(0, 2).toUpperCase(),
+                avatarColor: "#46978a",
+                lastMessage: "",
+                time: "",
+                online,
+                kind: "people",
+            };
+
+            const newContact: ContactEntry = {
+                id: user,
+                name: user,
+                initials: user.slice(0, 2).toUpperCase(),
+                color: "#989bff",
+                detail: "",
+                online,
+            };
+
+            // Không thêm trùng tài khoản.
+            const alreadyExists = friends.some(
+                friend => friend.name.toLowerCase() === user.toLowerCase()
+            );
+
+            if (!alreadyExists) {
+                dispatch(setFriends([...friends, newContact]));
+            }
+
+            // Mở cuộc trò chuyện.
+            setSelectedChat(chat);
+            setActiveSection("Tin nhắn");
+            setQuery("");
+
+        } catch (error) {
+            alert(
+                error instanceof Error
+                    ? error.message
+                    : "Không thể tìm kiếm người dùng."
+            );
+        } finally {
+            setSearchingUser(false);
+        }
+    };
+
+    const refreshChats = async () => {
+        dispatch(invalidateHistory());
+        await refreshUserList();
+        const entries = store.getState().contacts.friends;
+        await Promise.allSettled(entries.map(friend => dispatch(fetchPeopleChatHistory({username: friend.name, chatId: friend.id, page: 1})).unwrap()));
+    };
+
+    const exportHistory = () => {
+        const data = {format: "lyrachat-local-history-v1", exportedAt: new Date().toISOString(), userId: currentUserId, messages: store.getState().messages.messages};
+        const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type: "application/json"}));
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `lyrachat-${currentUserId}-history.json`;
+        anchor.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+
+    const importHistory = async (file: File | undefined) => {
+        if (!file) return;
+        try {
+            const backup = JSON.parse(await file.text()) as {format?: string; userId?: string; messages?: unknown};
+            if (backup.format !== "lyrachat-local-history-v1" || backup.userId !== currentUserId || !Array.isArray(backup.messages) || backup.messages.length > 200000) throw new Error("Tệp sao lưu không hợp lệ hoặc không thuộc tài khoản hiện tại.");
+            const valid = backup.messages.every(item => item && typeof item === "object" && typeof item.id === "string" && typeof item.chatId === "string" && typeof item.senderId === "string" && typeof item.content === "string" && typeof item.createdAt === "string");
+            if (!valid) throw new Error("Dữ liệu tin nhắn không đúng định dạng.");
+            dispatch(importLocalMessages(backup.messages as RootState["messages"]["messages"]));
+            alert("Đã nhập lịch sử vào phiên hiện tại. Dữ liệu không được tải lên máy chủ.");
+        } catch(error) { alert(error instanceof Error ? error.message : "Không đọc được tệp sao lưu."); }
+    };
+
+    return (
+        <main className={`app-shell lyra-workspace ${theme === "dark" ? "theme-dark" : ""} ${activeSection === "Danh bạ" ? "contacts-view" : ""}`}>
+            <Sidebar activeSection={activeSection} onSectionChange={(section) => {setActiveSection(section); setSelectedChat(null);}} settingsOpen={settingsOpen}
+                onSettingsToggle={() => setSettingsOpen(open => !open)}
+                theme={theme} onThemeChange={setTheme} onLogout={handleLogout}/>
+
+            {activeSection === "Danh bạ" ? <ContactDirectory /> : <>
+                <ChatList
+                    chats={activeSection === "Nhóm" ? filteredChats.filter(chat => chat.kind === "group") : activeSection === "Thư mục" ? filteredChats.filter(chat => pinnedIds.includes(chat.id)) : activeSection === "Cuộc gọi" ? [] : filteredChats}
+                    selectedId={selectedChat?.id}
+                    onSelect={(chat) => { setSelectedChat(chat); if (activeSection !== "Tin nhắn") setActiveSection("Tin nhắn"); }}
+                    query={query}
+                    onQueryChange={setQuery}
+                    onSearchUser={handleSearchUser}
+                    searchingUser={searchingUser}
+                    onCompose={() => setComposeOpen(true)}
+                />
+                <section className="conversation-panel" aria-label="Nội dung cuộc trò chuyện">
+                    {activeSection === "Cuộc gọi" ? <div className="feature-placeholder"><i className="bi bi-telephone"/><h2>Cuộc gọi</h2><p>Máy chủ hiện chưa cung cấp API gọi thoại/video. Không thể thực hiện cuộc gọi thực.</p></div>
+                      : activeSection === "Nhóm" && !selectedChat ? <div className="feature-placeholder"><i className="bi bi-people"/><h2>Nhóm trò chuyện</h2><p>Các nhóm được lấy từ danh sách máy chủ. Gửi tin nhắn nhóm yêu cầu API nhóm riêng.</p></div>
+                      : activeSection === "Thư mục" && !selectedChat ? <div className="feature-placeholder"><i className="bi bi-folder2-open"/><h2>Thư mục đã lưu</h2><p>Mở cuộc trò chuyện ở mục Tin nhắn và bấm “Lưu vào thư mục” để đánh dấu ngay trên trình duyệt này.</p></div>
+                      : <>
+                        {selectedChat && <div className="conversation-pin-toolbar"><span>{selectedChat.name}</span><button onClick={() => setPinnedIds(ids => ids.includes(selectedChat.id) ? ids.filter(id => id !== selectedChat.id) : [...ids, selectedChat.id])}><i className={`bi bi-${pinnedIds.includes(selectedChat.id) ? "bookmark-check-fill" : "bookmark"}`} /> {pinnedIds.includes(selectedChat.id) ? "Bỏ lưu" : "Lưu vào thư mục"}</button></div>}
+                        <ChatWindow chat={selectedChat} currentUserId={currentUserId} onMessageSent={refreshUserList}/>
+                      </>}
+                    <div className="lyra-status-dock">
+                        <span className={`api-state ${connectionStatus === "CONNECTED" ? "connected" : ""}`}><i className="bi bi-wifi"/> {connectionStatus === "CONNECTED" ? "Đã kết nối API" : connectionStatus === "CONNECTING" ? "Đang kết nối" : "Mất kết nối API"}</span>
+                        <button onClick={() => void refreshChats()}><i className="bi bi-arrow-repeat"/> Làm mới hội thoại</button>
+                        <button onClick={exportHistory}><i className="bi bi-download"/> Sao lưu lịch sử</button>
+                        <label className="dock-upload"><i className="bi bi-upload"/> Nhập lịch sử<input type="file" accept=".json,application/json" onChange={(event) => {void importHistory(event.target.files?.[0]); event.target.value = "";}}/></label>
+                        <button onClick={() => setApiLogOpen(true)}><i className="bi bi-file-earmark-text"/> Nhật ký API</button>
+                    </div>
+                </section>
+            </>}
+            {composeOpen && <div className="lyra-modal-backdrop" onMouseDown={(e) => {if (e.target === e.currentTarget) setComposeOpen(false);}}>
+                <form className="lyra-modal" onSubmit={event => {event.preventDefault(); if (!composeValue.trim()) return; void handleSearchUser(composeValue.trim()); setComposeOpen(false); setComposeValue("");}}>
+                    <h2>Tạo cuộc trò chuyện</h2><p>Nhập username của tài khoản đang tồn tại trên máy chủ.</p>
+                    <input autoFocus value={composeValue} onChange={event => setComposeValue(event.target.value)} placeholder="Nhập username" required/>
+                    <div className="lyra-modal-actions"><button type="button" onClick={() => setComposeOpen(false)}>Hủy</button><button type="submit">Bắt đầu trò chuyện</button></div>
+                </form>
+            </div>}
+            {apiLogOpen && <div className="lyra-modal-backdrop" onMouseDown={e => {if (e.target === e.currentTarget) setApiLogOpen(false);}}><div className="lyra-modal lyra-log-modal"><h2>Nhật ký API WebSocket</h2><p>Chỉ hiển thị loại sự kiện, trạng thái và thời gian, không hiển thị mật khẩu hoặc nội dung tin nhắn.</p><div className="lyra-log-list">{apiLogs.length ? [...apiLogs].reverse().map((entry, index) => <div key={index}><time>{entry.at}</time><strong>{entry.direction}</strong><span>{entry.event}</span><small>{entry.status}</small></div>) : <p>Chưa có sự kiện mới kể từ khi mở ứng dụng.</p>}</div><div className="lyra-modal-actions"><button type="button" onClick={() => setApiLogs([])}>Xóa nhật ký</button><button type="button" onClick={() => setApiLogOpen(false)}>Đóng</button></div></div></div>}
+        </main>
+    );
 }
+
+function ProtectedChatRoute() {
+    const { isAuthenticated, userId } = useSelector(
+        (state: RootState) => state.auth
+    );
+
+    return isAuthenticated && userId ? (
+        <ChatWorkspace currentUserId={userId} />
+    ) : (
+        <Navigate to="/login" replace />
+    );
+}
+
+function AppRoutes() {
+    const dispatch = useDispatch<AppDispatch>();
+    const navigate = useNavigate();
+
+    const isAuthenticated = useSelector((state: RootState) => state.auth.isAuthenticated);
+
+    const handleLogin = (userId: string, reLoginCode: string) => {
+        dispatch(setCredentials({ userId, reLoginCode }));
+        navigate("/chat", { replace: true });
+    };
+
+    return (
+        <Routes>
+            <Route path="/" element={
+                <Navigate to={isAuthenticated ? "/chat" : "/login"} replace/>
+            }
+            />
+
+            <Route path="/login" element={isAuthenticated ? (
+                <Navigate to="/chat" replace />
+            ) : (
+                <Login onLogin={handleLogin} onRegister={() => navigate("/register")}/>
+            )}
+            />
+
+            <Route path="/register" element={
+                isAuthenticated ? (
+                    <Navigate to="/chat" replace />
+                ) : (
+                    <Register onBackToLogin={() => navigate("/login")}/>
+                )
+                }
+            />
+
+            <Route path="/chat" element={<ProtectedChatRoute />}/>
+
+            <Route path="*" element={
+                <Navigate to={isAuthenticated ? "/chat" : "/login"} replace/>
+            }/>
+        </Routes>
+    );
+}
+
+function App() {
+    return (
+        <AuthInitializer>
+            <AppRoutes />
+        </AuthInitializer>
+    );
+}
+
+export default App;

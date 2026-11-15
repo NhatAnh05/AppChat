@@ -1,10 +1,18 @@
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import App from "./App";
-import "./styles/main.scss";
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './index.css'
+import App from './App.tsx'
+import {Provider} from "react-redux";
+import {store} from "./store/store.ts";
+import { BrowserRouter } from "react-router-dom";
+import "bootstrap-icons/font/bootstrap-icons.css";
 
-createRoot(document.getElementById("root")!).render(
-    <StrictMode>
-        <App />
-    </StrictMode>
-);
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+      <Provider store={store}>
+          <BrowserRouter>
+              <App />
+          </BrowserRouter>
+      </Provider>
+  </StrictMode>,
+)

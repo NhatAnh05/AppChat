@@ -1,58 +1,127 @@
-import { BellOff, MessageSquarePlus, Pin, Search, UsersRound, X } from 'lucide-react';
-import { useMemo } from 'react';
-import Avatar from './Avatar';
-import type { Conversation, Message } from '../data/previewContent';
-import { messagePreview as previewMediaMessage } from '../services/mediaMessages';
-import type { Section } from './Rail';
+import { useEffect, useRef, useState } from "react";
+import { SettingsDialog } from "./SettingsDialog";
+import { useSelector } from "react-redux";
+import type { RootState } from "../store/store";
+import {websocketService, type WebSocketState} from "../services/websocket.ts";
 
-export type Filter = 'all' | 'unread' | 'groups';
-type Props = {
-  section: Section;
-  messagePreview?: boolean;
-  conversations: Conversation[];
-  messages?: Record<string,Message[]>;
-  selected: string;
-  filter: Filter;
-  search: string;
-  onSelect: (id: string) => void;
-  onFilter: (filter: Filter) => void;
-  onSearch: (search: string) => void;
-  onNewChat: () => void;
-  onShowChat: () => void;
-  onUpdateChat: (id: string, changes: Partial<Conversation>) => void;
-  onRemoveChat: (id: string) => void;
+type SidebarProps = {
+  activeSection: string;
+  onSectionChange: (section: string) => void;
+  settingsOpen: boolean;
+  onSettingsToggle: () => void;
+  theme: "light" | "dark";
+  onThemeChange: (theme: "light" | "dark") => void;
+  onLogout: () => void;
 };
 
-const filters: { id: Filter; label: string }[] = [
-  { id: 'all', label: 'Tất cả' }, { id: 'unread', label: 'Cá nhân' }, { id: 'groups', label: 'Nhóm' },
+const navItems = [
+  { label: 'Tin nh\u1EAFn', icon: 'message' },
+  { label: 'Danh b\u1EA1', icon: 'users' },
+  { label: 'Nhóm', icon: 'group' },
+  { label: 'Cuộc gọi', icon: 'phone' },
+  { label: 'Thư mục', icon: 'folder' },
+  { label: 'C\u00E0i \u0111\u1EB7t', icon: 'settings' },
 ];
 
-function ChatRow({ chat, selected, messagePreview, onClick }: { chat: Conversation; selected: boolean; messagePreview: boolean; onClick: () => void }) {
-  return <button type="button" className={`conversation ${selected ? 'selected' : ''}`} onClick={onClick} aria-current={selected ? 'true' : undefined}>
-    <Avatar initial={chat.initial} color={chat.color} group={chat.group} presence={chat.presence} size={48}/>
-    <span className="conversation-copy"><span className="conversation-title">{chat.name}</span><span className={`conversation-preview ${chat.unread ? 'unread' : ''}`}>{messagePreview ? previewMediaMessage(chat.preview) : "Nội dung xem trước đã ẩn"}</span></span>
-    <span className="conversation-end"><span className={`conversation-time ${chat.unread ? 'emphasis' : ''}`}>{chat.time}</span>{chat.unread ? <span className="unread-bubble">{chat.unread}</span> : chat.muted ? <BellOff size={13}/> : chat.pinned ? <Pin size={13}/> : null}</span>
-  </button>;
+function NavIcon({ name }: { name: string }) {
+  if (name === 'message') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-1 2v-5.5A7.5 7.5 0 1 1 20 11.5Z" /></svg>;
+  if (name === 'users') return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20v-1.5a6.5 6.5 0 0 1 13 0V20M16 5a3.5 3.5 0 0 1 0 6.8M18 14a5 5 0 0 1 3.5 4.8V20" /></svg>;
+  if (name === 'group') return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M17 15a5 5 0 0 1 4 5"/></svg>;
+  if (name === 'phone') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h4l2 5-2.6 2.3a15 15 0 0 0 4.3 4.3L16 12l5 2v4a3 3 0 0 1-3 3A15 15 0 0 1 3 6a3 3 0 0 1 3-3Z"/></svg>;
+  if (name === 'folder') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 3h9v11H3V6Z"/><path d="M17 12v6m-3-3h6"/></svg>;
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="m19.4 15 .1.1a1.7 1.7 0 1 1-2.4 2.4l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a1.7 1.7 0 1 1-3.4 0v-.2a1.7 1.7 0 0 0-2.9-1.2l-.1.1a1.7 1.7 0 1 1-2.4-2.4l.1-.1a1.7 1.7 0 0 0-1.2-2.9H4a1.7 1.7 0 1 1 0-3.4h.2a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a1.7 1.7 0 1 1 2.4-2.4l.1.1a1.7 1.7 0 0 0 2.9-1.2V2a1.7 1.7 0 1 1 3.4 0v.2a1.7 1.7 0 0 0 2.9 1.2l.1-.1a1.7 1.7 0 1 1 2.4 2.4l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a1.7 1.7 0 1 1 0 3.4h-.2a1.7 1.7 0 0 0-1.2 2.9Z" /></svg>;
 }
 
-export default function Sidebar({ messagePreview = true, conversations, messages = {}, section, selected, filter, search, onSelect, onFilter, onSearch, onNewChat, onShowChat, onUpdateChat: _onUpdateChat, onRemoveChat: _onRemoveChat }: Props) {
-  const visible = useMemo(() => conversations.filter(chat => {
-    if (section === 'archive' ? !chat.archived : chat.archived) return false;
-    if (section === 'chats' && filter === 'unread' && chat.group) return false;
-    if (section === 'chats' && filter === 'groups' && !chat.group) return false;
-    const needle=search.trim().toLocaleLowerCase('vi');
-    return !needle || `${chat.name} ${chat.preview}`.toLocaleLowerCase('vi').includes(needle) || (messages[chat.id]??[]).some(m=>previewMediaMessage(m.text??'').toLocaleLowerCase('vi').includes(needle));
-  }), [conversations, messages, section, filter, search]);
-  const ordered = [...visible].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
+export function Sidebar({ activeSection, onSectionChange, settingsOpen, onSettingsToggle, theme, onThemeChange, onLogout }: SidebarProps) {
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const profileActionsRef = useRef<HTMLDivElement>(null);
+  const settingsAnchorRef = useRef<HTMLDivElement>(null);
+  const userId = useSelector((state: RootState) => state.auth.userId);
+  const [connectionStatus, setConnectionStatus] = useState<WebSocketState>(
+      websocketService.getStatus()
+  );
+  const displayName = userId || "Người dùng";
 
-  return <aside className="sidebar" aria-label="Danh sách hội thoại">
-    <div className="sidebar-header"><div><span className="eyebrow">LYRACHAT</span><h1>{section === 'chats' ? 'Tin nhắn' : section === 'archive' ? 'Đã lưu trữ' : 'Danh bạ'}</h1></div><div className="sidebar-heading-tools"><button type="button" title="Tin nhắn mới" aria-label="Tin nhắn mới" className="new-chat-button" onClick={onNewChat}><MessageSquarePlus size={20}/></button></div></div>
-    <div className="search-box"><Search size={18}/><input aria-label="Tìm kiếm" placeholder={section === 'contacts' ? 'Tìm trong danh bạ' : 'Tìm kiếm cuộc trò chuyện'} value={search} onChange={event => onSearch(event.target.value)}/>{search && <button type="button" aria-label="Xóa tìm kiếm" onClick={() => onSearch('')}><X size={16}/></button>}</div>
-    {section === 'chats' && <div className="filters" role="group" aria-label="Bộ lọc hội thoại">{filters.map(f => <button type="button" key={f.id} onClick={() => onFilter(f.id)} className={filter === f.id ? 'active' : ''}>{f.label}</button>)}</div>}
-    {section === 'contacts' && <p className="sidebar-help">Nhập username ở nút Tin nhắn mới để kiểm tra người dùng trên máy chủ.</p>}
-    <div className="conversation-list">{ordered.map(chat => <div key={chat.id} className="conversation-entry"><ChatRow chat={chat} messagePreview={messagePreview} selected={selected===chat.id} onClick={()=>{onSelect(chat.id);onShowChat();}}/></div>)}
-      {!visible.length && <div className="list-empty"><UsersRound size={28}/><strong>Chưa có hội thoại</strong><small>Hãy tạo hội thoại hoặc tham gia phòng chat.</small></div>}
+  const avatarText = displayName
+      .slice(0, 2)
+      .toUpperCase();
+
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!profileActionsRef.current?.contains(event.target as Node)) setProfileMenuOpen(false);
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    return () => document.removeEventListener("pointerdown", closeOnOutsideClick);
+  }, [profileMenuOpen]);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!settingsAnchorRef.current?.contains(event.target as Node)) onSettingsToggle();
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    return () => document.removeEventListener("pointerdown", closeOnOutsideClick);
+  }, [settingsOpen, onSettingsToggle]);
+
+  useEffect(() => {
+    const unsubscribe = websocketService.onStatus((status) => {
+      setConnectionStatus(status);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  return <aside className="sidebar">
+    <a className="brand" href="/chat" aria-label="LyraChat"><img className="lyra-logo" src="/lyra-logo.png" alt=""/><span>LyraChat</span></a>
+    <nav className="sidebar-nav" aria-label="&#272;i&#7873;u h&#432;&#7899;ng ch&#237;nh">
+      {navItems.map((item) => {
+        const isSettings = item.icon === 'settings';
+        const selected = isSettings ? settingsOpen : activeSection === item.label;
+        const button = <button className={`nav-item ${selected ? 'is-active' : ''}`} onClick={() => isSettings ? onSettingsToggle() : onSectionChange(item.label)}><NavIcon name={item.icon} /><span>{item.label}</span></button>;
+        if (isSettings) {
+          return <div className="settings-popover-anchor" key={item.label} ref={settingsAnchorRef}>
+            {button}
+            {settingsOpen && <SettingsDialog theme={theme} onThemeChange={onThemeChange} onLogout={onLogout} onClose={() => onSettingsToggle()}/>}
+          </div>;
+        }
+        return <div key={item.label}>{button}</div>;
+      })}
+    </nav>
+    <div className="user-profile">
+      <div className="profile-avatar">
+        {avatarText}
+        <span className="online-dot" />
+      </div>
+
+      <div className="profile-copy" style={{display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between", flex: 1, minWidth: 0}}>
+        <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <strong>{displayName}</strong>
+          <span>{connectionStatus === "CONNECTED" ? "Online" : connectionStatus === "CONNECTING" ? "Đang kết nối..." : "Ngoại tuyến"}
+          </span>
+        </div>
+
+        <div className="profile-actions" ref={profileActionsRef} style={{ flexShrink: 0, marginLeft: "8px" }}>
+          <button className="more-button" aria-label="Tùy chọn tài khoản" aria-expanded={profileMenuOpen} onClick={() => setProfileMenuOpen((open) => !open)}>
+            <span aria-hidden="true">⌄</span>
+          </button>
+
+          {profileMenuOpen && (
+              <div className="profile-menu">
+                <button className="settings-logout" onClick={() => {setProfileMenuOpen(false);onLogout();}}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M10 17l5-5-5-5M15 12H3m9-8h7a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-7" />
+                  </svg>
+                  Đăng xuất
+                </button>
+              </div>
+          )}
+        </div>
+      </div>
     </div>
-    <div className="sidebar-bottom"><span className="sidebar-bottom-status"/><span>Kết nối API giảng viên</span><span className="preview-pill">LIVE</span></div>
   </aside>;
 }
