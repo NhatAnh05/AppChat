@@ -1,3 +1,4 @@
+import { parseChatTime } from "../utils/chatTime";
 import { useEffect, useRef } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { fetchPeopleChatHistory } from "../features/messages/messagesSlice";
@@ -11,15 +12,6 @@ type MessageListProps = {
   isPeopleChat: boolean;
 };
 
-function getTimestamp(value: string) {
-  const localTimestamp = value.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/);
-  if (localTimestamp) {
-    const [, year, month, day, hour, minute, second] = localTimestamp;
-    return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)).getTime();
-  }
-  return Date.parse(value);
-}
-
 export default function MessageList({ chatId, currentUserId, username, isPeopleChat }: MessageListProps) {
   const dispatch = useDispatch<AppDispatch>();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -29,7 +21,7 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
   const chatMessages = messages
     .filter((message) => message.chatId === chatId)
     .slice()
-    .sort((a, b) => getTimestamp(a.orderAt ?? a.createdAt) - getTimestamp(b.orderAt ?? b.createdAt));
+    .sort((a, b) => parseChatTime(a.orderAt ?? a.createdAt) - parseChatTime(b.orderAt ?? b.createdAt));
 
   const latestMessageId = chatMessages.at(-1)?.id;
   const firstPageLoaded = history?.loadedPages.includes(1) ?? false;

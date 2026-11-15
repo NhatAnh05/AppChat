@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:full": "node scripts/dev-full.mjs",
+    "media": "node server/media-server.mjs"
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.13.0",

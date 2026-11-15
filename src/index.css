@@ -669,3 +669,16 @@ button { color: inherit; }
   color: #888;
   text-transform: uppercase;
 }
+
+/* Bộ chọn emoji tại khung soạn tin, dùng chung SEND_CHAT dạng văn bản. */
+.emoji-picker-anchor { position: relative; flex: 0 0 auto; }
+.emoji-toggle { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 12px; border: 1px solid #c8dbd5; color: #245d4e; background: #eff8f5; cursor: pointer; font-size: 20px; }
+.emoji-toggle:hover, .emoji-toggle[aria-expanded="true"] { background: #d7eee5; }
+.emoji-picker { position: absolute; bottom: calc(100% + 12px); left: 0; width: 290px; max-width: min(290px, 85vw); padding: 14px; background: white; border: 1px solid #d7e5e0; border-radius: 14px; box-shadow: 0 12px 36px #102c2850; z-index: 50; }
+.emoji-picker-title { color: #1b304c; font-size: 13px; font-weight: 700; margin-bottom: 10px; }
+.emoji-picker-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.emoji-choice { font-size: 23px; height: 39px; border: 0; background: transparent; border-radius: 8px; cursor: pointer; }
+.emoji-choice:hover, .emoji-choice:focus-visible { background: #e2f4ed; outline: 2px solid #88b6a5; }
+.theme-dark .emoji-picker { background: #17252a; border-color: #375450; }
+.theme-dark .emoji-picker-title { color: #f1f5f9; }
+.theme-dark .emoji-toggle { background: #203d37; color: #b3e4d0; border-color: #375450; }

@@ -1,6 +1,7 @@
 import type { ChatMessage } from "../types/chat";
 import { websocketService, type WebSocketMessage } from "./websocket";
 import { authService } from "./authService";
+import { encodeChatContent, decodeChatContent } from "./chatContentCodec";
 
 type ApiPeopleMessage = {
   id: string | number;
@@ -53,7 +54,7 @@ function mapMessage(message: ApiPeopleMessage, chatId: string): ChatMessage {
     senderName: message.name,
     recipientId: message.to,
     recipientName: message.to,
-    content: message.mes,
+    content: decodeChatContent(message.mes),
     createdAt: message.createAt,
     type: message.type,
   };
@@ -144,6 +145,9 @@ function requestSendMessage(recipient: string, content: string): Promise<WebSock
         return;
       }
 
+      // A generic SEND_CHAT success might concern a different message.
+      // Only confirm an identified payload, or an acknowledgement without
+      // payload when the send queue has exactly one in-flight request.
       const matchesRequest = message.status === "success" || (data?.to && data?.mes === content);
       if (!matchesRequest) return;
 
@@ -197,6 +201,7 @@ export const peopleChatService = {
     knownMessageIds: string[] = [],
   ): Promise<ChatMessage | null> {
     const trimmedContent = content.trim();
+    const transportContent = encodeChatContent(trimmedContent);
     const orderAt = new Date().toISOString();
     if (!trimmedContent) throw new Error("Nhập nội dung tin nhắn.");
     if (!sender.trim() || !recipient.trim()) throw new Error("Thiếu người gửi hoặc người nhận.");
@@ -209,31 +214,33 @@ export const peopleChatService = {
 
     let response: WebSocketMessage;
     try {
-      response = await requestSendMessage(recipient, trimmedContent);
+      response = await requestSendMessage(recipient, transportContent);
     } catch (error) {
       if (!(error instanceof SendConfirmationMissingError)) throw error;
 
       try {
         await ensureAuthenticatedConnection();
-        const historyResponse = await requestHistory(recipient, 1);
-        if (historyResponse.status === "error") return null;
-        const recentHistory = validateMessages(historyResponse.data)
-          .slice(0, 50)
-          .map((message) => mapMessage(message, recipient));
         const knownIds = new Set(knownMessageIds);
-        const confirmedMessage = recentHistory.find((message) => {
-          return (
+        // Some deployments do not emit a SEND_CHAT acknowledgment. Verify the
+        // actual server history, allowing a short delay for asynchronous writes.
+        for (let attempt = 0; attempt < 3; attempt++) {
+          if (attempt > 0) await new Promise(resolve => window.setTimeout(resolve, 1200 * attempt));
+          const historyResponse = await requestHistory(recipient, 1);
+          if (historyResponse.status === "error") continue;
+          const recentHistory = validateMessages(historyResponse.data)
+            .slice(0, 50)
+            .map(message => mapMessage(message, recipient));
+          const confirmedMessage = recentHistory.find(message =>
             !knownIds.has(message.id) &&
             message.senderId.toLowerCase() === sender.toLowerCase() &&
             message.recipientId?.toLowerCase() === recipient.toLowerCase() &&
             message.content === trimmedContent
           );
-        });
-
-        if (confirmedMessage) return confirmedMessage;
-        return null;
-      } catch {
-        return null;
+          if (confirmedMessage) return confirmedMessage;
+        }
+        throw new Error("Máy chủ chưa xác nhận hoặc chưa lưu tin nhắn chứa emoji. Chữ thường gửi được nhưng nội dung mã hóa chưa được server phản hồi. Hãy mở Nhật ký API để kiểm tra SEND_CHAT và GET_PEOPLE_CHAT_MES; không gửi lại liên tục để tránh trùng tin.");
+      } catch (historyError) {
+        throw historyError instanceof Error ? historyError : new Error("Không xác minh được trạng thái gửi tin.");
       }
     }
 
@@ -254,7 +261,7 @@ export const peopleChatService = {
       senderName,
       recipientId: recipientName,
       recipientName,
-      content: responseData.mes ?? trimmedContent,
+      content: decodeChatContent(responseData.mes ?? transportContent),
       createdAt: responseData.createAt ?? new Date().toISOString(),
       orderAt,
       type: responseData.type ?? 0,

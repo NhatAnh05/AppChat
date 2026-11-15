@@ -1,3 +1,4 @@
+import { parseChatTime, formatChatTime } from "./utils/chatTime";
 import {useEffect, useMemo, useState} from "react";
 import {useDispatch, useSelector, useStore} from "react-redux";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
@@ -19,6 +20,7 @@ import type { AppDispatch, RootState } from "./store/store";
 import type { Chat } from "./types/chat";
 import type { ContactEntry } from "./types/contact";
 import "./App.css";
+import { decodeChatContent } from "./services/chatContentCodec";
 import {userService} from "./services/userService.ts";
 
 function mapUserToContact(item: UserListItem, type: "friend" | "group"): ContactEntry {
@@ -102,7 +104,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             senderName: data.name,
             recipientId: data.to,
             recipientName: data.to,
-            content: data.mes,
+            content: decodeChatContent(data.mes),
             createdAt: data.createAt ?? new Date().toISOString(),
             orderAt: new Date().toISOString(),
             type: typeof data.type === "number" ? data.type : 0,
@@ -178,8 +180,8 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                     .filter((message) => message.chatId === chat.id)
                     .sort(
                         (a, b) =>
-                            new Date(b.orderAt ?? b.createdAt).getTime() -
-                            new Date(a.orderAt ?? a.createdAt).getTime()
+                            parseChatTime(b.orderAt ?? b.createdAt) -
+                            parseChatTime(a.orderAt ?? a.createdAt)
                     )[0];
 
                 return {
@@ -188,12 +190,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                         ? `${latestMessage.senderId === currentUserId ? "Bạn: " : ""}${latestMessage.content}`
                         : "",
                     time: latestMessage
-                        ? new Date(
-                            latestMessage.createdAt
-                        ).toLocaleTimeString("vi-VN", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                        })
+                        ? formatChatTime(latestMessage.createdAt)
                         : "",
                 };
             })
