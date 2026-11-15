@@ -5,6 +5,7 @@ import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { ChatList } from "./components/ChatList";
 import { ContactDirectory } from "./components/ContactDirectory";
 import { Sidebar } from "./components/Sidebar";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { Login } from "./components/Login";
 import { Register } from "./components/Register";
 import ChatWindow from "./components/ChatWindow";
@@ -67,7 +68,8 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const [activeSection, setActiveSection] = useState("Tin nhắn");
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [searchingUser, setSearchingUser] = useState(false);
-    const [theme, setTheme] = useState<"light" | "dark">("light");
+    const [theme, setTheme] = useState<"light" | "dark">(() => localStorage.getItem("lyra-theme") === "dark" ? "dark" : "light");
+    useEffect(() => localStorage.setItem("lyra-theme",theme), [theme]);
 
     const friends = useSelector((state: RootState) => state.contacts.friends);
     const groups = useSelector((state: RootState) => state.contacts.groups);
@@ -363,11 +365,10 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
 
     return (
         <main className={`app-shell lyra-workspace ${theme === "dark" ? "theme-dark" : ""} ${activeSection === "Danh bạ" ? "contacts-view" : ""}`}>
-            <Sidebar activeSection={activeSection} onSectionChange={(section) => {setActiveSection(section); setSelectedChat(null);}} settingsOpen={settingsOpen}
-                onSettingsToggle={() => setSettingsOpen(open => !open)}
-                theme={theme} onThemeChange={setTheme} onLogout={handleLogout}/>
+            <Sidebar activeSection={activeSection} onSectionChange={(section) => {setSettingsOpen(false);setActiveSection(section); if(section !== "Cài đặt")setSelectedChat(null);}} settingsOpen={settingsOpen}
+                onSettingsToggle={() => {setSettingsOpen(true);setActiveSection("Cài đặt");}} onLogout={handleLogout}/>
 
-            {activeSection === "Danh bạ" ? <ContactDirectory /> : <>
+            {activeSection === "Cài đặt" ? <SettingsDialog theme={theme} onThemeChange={setTheme} onLogout={handleLogout} onClose={() => {setSettingsOpen(false);setActiveSection("Tin nhắn");}} /> : activeSection === "Danh bạ" ? <ContactDirectory /> : <>
                 <ChatList
                     chats={activeSection === "Nhóm" ? filteredChats.filter(chat => chat.kind === "group") : activeSection === "Thư mục" ? filteredChats.filter(chat => pinnedIds.includes(chat.id)) : activeSection === "Cuộc gọi" ? [] : filteredChats}
                     selectedId={selectedChat?.id}
@@ -383,7 +384,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                       : activeSection === "Nhóm" && !selectedChat ? <div className="feature-placeholder"><i className="bi bi-people"/><h2>Nhóm trò chuyện</h2><p>Các nhóm được lấy từ danh sách máy chủ. Gửi tin nhắn nhóm yêu cầu API nhóm riêng.</p></div>
                       : activeSection === "Thư mục" && !selectedChat ? <div className="feature-placeholder"><i className="bi bi-folder2-open"/><h2>Thư mục đã lưu</h2><p>Mở cuộc trò chuyện ở mục Tin nhắn và bấm “Lưu vào thư mục” để đánh dấu ngay trên trình duyệt này.</p></div>
                       : <>
-                        {selectedChat && <div className="conversation-pin-toolbar"><span>{selectedChat.name}</span><button onClick={() => setPinnedIds(ids => ids.includes(selectedChat.id) ? ids.filter(id => id !== selectedChat.id) : [...ids, selectedChat.id])}><i className={`bi bi-${pinnedIds.includes(selectedChat.id) ? "bookmark-check-fill" : "bookmark"}`} /> {pinnedIds.includes(selectedChat.id) ? "Bỏ lưu" : "Lưu vào thư mục"}</button></div>}
+                        
                         <ChatWindow chat={selectedChat} currentUserId={currentUserId} onMessageSent={refreshUserList}/>
                       </>}
                     <div className="lyra-status-dock">

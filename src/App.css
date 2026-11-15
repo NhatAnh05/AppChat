@@ -286,3 +286,110 @@
 .theme-dark .media-attach-menu button { color:#e4e9e7; }
 .theme-dark .media-attach-menu button i { color:#b3e4d0; }
 .theme-dark .media-attach-menu button:hover { background:#29483f; }
+
+/* LyraChat v6 — chat workspace polish, account settings, profile and call actions */
+.lyra-workspace {--lyra-primary:#176956; --lyra-ink:#19322d; --lyra-soft:#eaf5f1;}
+.lyra-workspace .chat-list-panel {border-right:1px solid #e5eeed;box-shadow:3px 0 16px rgba(12,52,47,.025);}
+.lyra-workspace .conversation-panel .chat-window {background:#f7fafb;}
+.lyra-workspace .chat-window-header {background:rgba(255,255,255,.97);border-bottom:1px solid #e3ebea;box-shadow:0 2px 12px rgba(17,66,58,.04);min-height:76px;padding:13px 23px;}
+.lyra-workspace .chat-header-info {min-width:0;}
+.lyra-workspace .chat-header-actions {display:flex;align-items:center;gap:9px;margin-left:auto;}
+.lyra-workspace .chat-header-actions button {display:inline-flex;align-items:center;justify-content:center;gap:9px;border:1px solid #e3edeb;background:#f6faf9;border-radius:12px;color:#176956;min-width:39px;height:39px;padding:0 11px;font-size:17px;cursor:pointer;transition:background .15s,transform .15s;}
+.lyra-workspace .chat-header-actions button:hover {background:#e3f2ed;transform:translateY(-1px)}
+.lyra-workspace .chat-header-actions .chat-profile-btn {font-size:12px;font-weight:700;white-space:nowrap;padding:0 13px;}
+.lyra-workspace .chat-header-actions .chat-profile-btn i {font-size:17px;}
+.lyra-avatar-button {border:0;cursor:pointer;flex-shrink:0;}
+.lyra-profile-name-button {display:flex;flex-direction:column;min-width:0;text-align:left;padding:0;border:0;background:transparent;color:inherit;cursor:pointer;}
+.lyra-profile-name-button strong {color:white;}
+.lyra-profile-name-button span {font-size:11px;color:#b2d3ca;}
+.lyra-account-menu-item {width:100%;display:flex;gap:9px;align-items:center;padding:10px 12px;background:none;border:0;text-align:left;cursor:pointer;font-size:12px;color:#253c38;}
+.lyra-account-menu-item:hover {background:#eef7f4;}
+.lyra-workspace .lyra-account-popover {width:335px;top:auto;bottom:0;left:calc(100% + 17px);max-height:min(80vh,650px);overflow:auto;box-shadow:0 20px 55px rgba(15,45,39,.22);border-radius:18px;}
+.lyra-account-settings {width:100%;padding:0!important;background:white;border-radius:18px;overflow:hidden;box-shadow:none!important;}
+.lyra-settings-header {padding:18px 19px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e8efed;}
+.lyra-settings-header div {display:flex;flex-direction:column;gap:3px;}
+.lyra-settings-header strong {font-size:18px;color:#1c3732;}
+.lyra-settings-header small,.lyra-settings-identity small {color:#7c928d;font-size:11px;}
+.lyra-icon-close {border:0;background:#edf3f1;color:#536a65;width:30px;height:30px;display:grid;place-items:center;border-radius:9px;cursor:pointer;}
+.lyra-settings-identity {margin:15px 18px;display:flex;align-items:center;gap:11px;background:#f4f9f7;padding:12px;border-radius:13px;}
+.lyra-settings-identity>div:last-child {display:flex;flex-direction:column;gap:3px;min-width:0;overflow-wrap:anywhere;color:#263f39;}
+.lyra-settings-avatar {width:43px;height:43px;border-radius:13px;background:#318878;color:white;display:grid;place-items:center;font-weight:700;flex-shrink:0;}
+.lyra-settings-tabs {display:flex;padding:0 17px;border-bottom:1px solid #e8efed;gap:8px;}
+.lyra-settings-tabs button {flex:1;border:0;background:none;padding:12px 4px;color:#718780;font-size:12px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;}
+.lyra-settings-tabs button.active {border-color:#277a67;color:#1a715d;}
+.lyra-settings-body {padding:17px 19px 19px;display:grid;gap:13px;}
+.lyra-settings-body>label:not(.lyra-settings-switch) {display:grid;gap:7px;color:#334d46;font-size:12px;font-weight:700;}
+.lyra-settings-body input:not([type=checkbox]),.lyra-settings-body textarea {border:1px solid #dde9e5;border-radius:10px;background:#fbfdfc;padding:10px;color:#233d36;font:inherit;font-size:12px;width:100%;resize:vertical;outline:none;}
+.lyra-settings-body input:focus,.lyra-settings-body textarea:focus {border-color:#23836a;}
+.lyra-settings-account,.lyra-settings-switch {display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12px;color:#344d47;}
+.lyra-settings-account strong {overflow-wrap:anywhere;text-align:right;font-size:11px;}
+.lyra-settings-account i,.lyra-settings-switch i {margin-right:7px;color:#23816b;}
+.lyra-settings-switch input {accent-color:#208266;width:17px;height:17px;}
+.lyra-settings-note {font-size:11px;line-height:1.5;color:#7a8986;margin:0;}
+.lyra-settings-save,.lyra-main-action {background:#1b715c;color:white;border:0;border-radius:11px;padding:11px 14px;font-weight:700;cursor:pointer;}
+.lyra-settings-save:disabled {opacity:.5;cursor:not-allowed;}
+.lyra-account-settings .settings-dialog-footer {padding:12px 19px 16px;border-top:1px solid #edf1ef;}
+.lyra-overlay {position:fixed;inset:0;background:rgba(9,30,29,.48);display:flex;align-items:center;justify-content:center;z-index:1100;padding:16px;}
+.lyra-detail-card,.lyra-call-card {position:relative;max-width:430px;width:100%;border-radius:21px;background:white;box-shadow:0 24px 70px #0a2c2938;overflow:hidden;padding:0 25px 26px;text-align:center;}
+.lyra-detail-card>.lyra-icon-close,.lyra-call-card>.lyra-icon-close {position:absolute;top:16px;right:16px;z-index:1;}
+.lyra-detail-cover {height:112px;margin:0 -25px;background:linear-gradient(130deg,#134739,#369884,#b2d7c9);}
+.lyra-detail-avatar {width:78px;height:78px;border-radius:25px;border:5px solid white;display:grid;place-items:center;color:white;font-size:24px;font-weight:700;margin:-38px auto 10px;position:relative;}
+.lyra-detail-card h2,.lyra-call-card h2 {font-size:21px;margin:5px 0;}
+.lyra-detail-status {font-size:12px;color:#7b918b;}
+.lyra-detail-info {display:flex;gap:12px;text-align:left;align-items:center;background:#f5faf8;border-radius:12px;margin-top:14px;padding:13px;color:#267b67;}
+.lyra-detail-info>div {display:flex;flex-direction:column;gap:4px;min-width:0;overflow-wrap:anywhere;color:#304a42;font-size:12px;}
+.lyra-detail-info small {color:#83958f;}
+.lyra-detail-card .lyra-main-action {width:100%;margin-top:20px;}
+.lyra-call-card {padding-top:46px;}
+.lyra-call-symbol {display:grid;place-items:center;background:#e9f5f0;color:#237e66;border-radius:25px;width:76px;height:76px;font-size:32px;margin:15px auto;}
+.lyra-call-card p {color:#6e817a;line-height:1.6;font-size:13px;}
+.lyra-call-card .lyra-main-action {width:100%;margin-top:10px;}
+.theme-dark .lyra-workspace .chat-window-header,.theme-dark .lyra-workspace .chat-window {background:#151e28;}
+.theme-dark .lyra-workspace .chat-header-actions button {background:#24353b;border-color:#344a4a;color:#d8f7ea;}
+@media(max-width:1100px){.lyra-workspace .chat-header-actions .chat-profile-btn span{display:none;}}
+@media(max-width:760px){.lyra-workspace .chat-window-header{padding:10px}.lyra-workspace .chat-header-actions{gap:4px}.lyra-workspace .chat-header-actions button{min-width:34px;height:34px;padding:0 8px}.lyra-workspace .lyra-account-popover {position:fixed;bottom:20px;left:76px;max-width:calc(100vw - 92px);}}
+
+/* LyraChat v7 — Trang cài đặt độc lập, toàn màn hình nội dung */
+.lyra-workspace:has(.lyra-settings-page){grid-template-columns:205px minmax(0,1fr)!important;}
+.lyra-settings-page{grid-column:2;min-width:0;height:100vh;overflow-y:auto;background:#f5f8f8;color:#203b36;padding:35px clamp(22px,4vw,65px) 65px;}
+.lyra-settings-top{display:flex;align-items:center;justify-content:space-between;gap:18px;max-width:1150px;margin:0 auto 28px;}
+.lyra-settings-eyebrow{color:#2b8a76;font-size:11px;letter-spacing:1.35px;font-weight:800;}
+.lyra-settings-top h1{font-size:30px;line-height:1.2;margin:6px 0 7px;font-weight:800;}
+.lyra-settings-top p{color:#79918b;font-size:13px;margin:0;}
+.lyra-back-to-chat{border:1px solid #d5e6e0;color:#266b5a;background:white;border-radius:11px;padding:12px 15px;display:flex;gap:10px;align-items:center;cursor:pointer;font-weight:700;font-size:12px;}
+.lyra-settings-layout{max-width:1150px;margin:auto;display:grid;grid-template-columns:250px minmax(0,1fr);gap:23px;align-items:start;}
+.lyra-settings-menu{background:#fff;border:1px solid #e7efec;border-radius:17px;padding:12px;box-shadow:0 8px 25px #163a3008;display:flex;flex-direction:column;gap:5px;}
+.lyra-settings-menu>button{width:100%;border:0;border-radius:12px;background:transparent;color:#475e56;cursor:pointer;display:flex;gap:14px;text-align:left;align-items:center;padding:15px 12px;}
+.lyra-settings-menu>button.selected{color:#176b57;background:#e7f5ef;}
+.lyra-settings-menu>button>i{font-size:20px;}
+.lyra-settings-menu>button span{display:flex;flex-direction:column;gap:5px;}
+.lyra-settings-menu strong{font-size:13px;}.lyra-settings-menu small{font-size:11px;color:#8c9e99;}
+.lyra-settings-menu-footer{border-top:1px solid #e9efed;margin-top:12px;padding:12px 4px 0;}
+.lyra-settings-menu-footer button{border:0;background:#fff2f2;color:#c23f3f;display:flex;align-items:center;gap:12px;padding:12px;border-radius:10px;cursor:pointer;width:100%;font-weight:700;}
+.lyra-settings-content{background:white;border-radius:18px;border:1px solid #e6eeeb;box-shadow:0 8px 25px #163a3009;overflow:hidden;min-width:0;}
+.lyra-profile-cover{height:135px;position:relative;overflow:hidden;display:flex;align-items:flex-start;padding:22px;color:#d8f8e8;font-size:12px;font-weight:700;background:linear-gradient(115deg,#123e35,#247760 55%,#72bfa5);}
+.lyra-profile-cover-shape{position:absolute;right:-35px;bottom:-95px;width:360px;height:215px;transform:rotate(-17deg);border:45px solid #ffffff12;border-radius:50%;}
+.lyra-profile-summary{display:flex;align-items:center;gap:17px;padding:0 29px 23px;margin-top:-44px;position:relative;border-bottom:1px solid #eaf0ed;}
+.lyra-profile-photo{height:94px;width:94px;flex-shrink:0;border:4px solid #fff;border-radius:50%;background:#2d957a;display:grid;place-items:center;color:#fff;font-size:30px;font-weight:800;cursor:pointer;position:relative;padding:0;}
+.lyra-profile-photo img{width:100%;height:100%;border-radius:50%;object-fit:cover;}
+.lyra-profile-photo>i{position:absolute;bottom:0;right:0;background:#fff;color:#1d7560;border:1px solid #dfece5;font-size:13px;display:grid;place-items:center;width:29px;height:29px;border-radius:50%;}
+.lyra-profile-summary>div{padding-top:38px;min-width:0;flex:1;}.lyra-profile-summary h2{font-size:19px;margin:0 0 4px;overflow-wrap:anywhere;}.lyra-profile-summary p{color:#889b95;margin:0;font-size:12px;}
+.lyra-photo-change{margin-top:35px;background:#eff8f4;border:1px solid #d9eae2;color:#176b57;cursor:pointer;border-radius:10px;padding:11px 13px;display:flex;gap:8px;align-items:center;white-space:nowrap;font-size:12px;font-weight:700;}
+.lyra-hidden-upload{display:none;}
+.lyra-profile-fields{padding:28px 30px 24px;}.lyra-profile-fields h3{font-size:17px;margin:0 0 6px;}.lyra-profile-fields>p,.lyra-settings-card>p{color:#879a93;font-size:12px;margin:0 0 22px;}
+.lyra-field-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px 20px;}.lyra-field-grid label{font-size:12px;color:#465e56;font-weight:700;display:flex;flex-direction:column;gap:8px;min-width:0;}.lyra-field-grid label.full{grid-column:1/-1;}
+.lyra-field-grid input,.lyra-field-grid textarea{width:100%;border:1px solid #dce9e4;border-radius:10px;background:#fbfdfc;min-height:44px;padding:12px 13px;font:inherit;font-size:13px;color:#24433a;outline:none;resize:vertical;}.lyra-field-grid input:focus,.lyra-field-grid textarea:focus{border-color:#2a8d73;box-shadow:0 0 0 3px #2a8d7317;}.lyra-field-grid input:disabled{background:#f0f3f2;color:#82938c;}
+.lyra-settings-bottom{border-top:1px solid #eaf0ed;padding:20px 30px 25px;display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;}.lyra-settings-bottom>p{max-width:420px;color:#83938e;font-size:11px;line-height:1.5;margin:0;}.lyra-settings-bottom>div{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}.lyra-settings-bottom span{color:#2d8c6f;font-size:12px;}.lyra-settings-bottom .lyra-settings-save{white-space:nowrap;}
+.lyra-settings-card{padding:32px;}.lyra-settings-card h2{font-size:20px;margin:0 0 8px;}.lyra-appearance-choices{display:grid;grid-template-columns:1fr 1fr;gap:18px;}.lyra-appearance-choice{border:2px solid #e4efea;border-radius:15px;padding:14px;background:white;cursor:pointer;display:flex;flex-direction:column;gap:9px;text-align:left;color:#2c453d;}.lyra-appearance-choice.selected{border-color:#298c72;background:#f3faf6;}.lyra-appearance-choice strong{font-size:13px;display:flex;gap:7px;align-items:center;}.lyra-appearance-choice small{font-size:11px;color:#849a91;}
+.lyra-theme-mini{height:125px;border-radius:9px;padding:18px;display:flex;gap:9px;background:#f0f4f6;}.lyra-theme-mini:before{content:'';width:28%;border-radius:7px;background:#2b7668;}.lyra-theme-mini i{display:block;width:15%;height:55%;border-radius:7px;background:#d7e2dc;}.lyra-theme-mini i:last-child{flex:1;height:100%;background:white;}.lyra-theme-mini.dark{background:#111c25;}.lyra-theme-mini.dark:before{background:#0e3434;}.lyra-theme-mini.dark i{background:#2b3844;}.lyra-theme-mini.dark i:last-child{background:#1b2a34;}
+.lyra-preference{display:flex;gap:18px;align-items:center;justify-content:space-between;padding:20px 0;border-bottom:1px solid #e6efeb;}.lyra-preference span{display:flex;flex-direction:column;gap:5px;}.lyra-preference strong{font-size:13px;}.lyra-preference small{font-size:11px;color:#84998f;}.lyra-preference input{accent-color:#188064;width:19px;height:19px;}
+.lyra-sidebar-avatar-img{width:100%;height:100%;object-fit:cover;border-radius:50%;}
+.lyra-settings-page~*{min-width:0;}
+.lyra-workspace.theme-dark:has(.lyra-settings-page) .lyra-settings-page{background:#101b22;color:#edf5f0;}
+.lyra-workspace.theme-dark .lyra-settings-menu,.lyra-workspace.theme-dark .lyra-settings-content,.lyra-workspace.theme-dark .lyra-appearance-choice{background:#1e2b32;border-color:#34444a;color:#edf5f0;}
+.lyra-workspace.theme-dark .lyra-settings-top p,.lyra-workspace.theme-dark .lyra-profile-summary p{color:#b2c4be;}
+.lyra-workspace.theme-dark .lyra-settings-menu>button{color:#cadbd5;}.lyra-workspace.theme-dark .lyra-settings-menu>button.selected{background:#214a42;color:#a5e6cf;}
+.lyra-workspace.theme-dark .lyra-field-grid label{color:#d7e7e2;}.lyra-workspace.theme-dark .lyra-field-grid input,.lyra-workspace.theme-dark .lyra-field-grid textarea{background:#17252c;border-color:#3a5250;color:#edf7f3;}
+.lyra-workspace.theme-dark .lyra-back-to-chat{background:#25363d;border-color:#3e5554;color:#c7e9d9;}.lyra-workspace.theme-dark .lyra-settings-card,.lyra-workspace.theme-dark .lyra-settings-bottom{border-color:#354842;}.lyra-workspace.theme-dark .lyra-appearance-choice.selected{border-color:#66c9a7;background:#22433b;}
+@media(max-width:950px){.lyra-workspace:has(.lyra-settings-page){grid-template-columns:68px minmax(0,1fr)!important;}.lyra-settings-layout{grid-template-columns:1fr;}.lyra-settings-menu{flex-direction:row;flex-wrap:wrap;}.lyra-settings-menu>button{width:auto;flex:1;min-width:150px;}.lyra-settings-menu-footer{margin:0;border:0;padding:0;}.lyra-settings-page{padding:22px;}}
+@media(max-width:580px){.lyra-settings-top{align-items:flex-start;flex-direction:column;}.lyra-settings-page{padding:14px;}.lyra-field-grid,.lyra-appearance-choices{grid-template-columns:1fr;}.lyra-profile-summary{flex-wrap:wrap;padding:0 17px 20px;}.lyra-photo-change{margin:0;}.lyra-profile-fields{padding:20px 17px;}.lyra-settings-bottom{padding:16px;}}
