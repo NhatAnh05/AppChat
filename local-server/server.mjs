@@ -81,8 +81,8 @@ function handle(peer, raw) {
     }
     return result(peer,event,[...all.values()].sort((a,b)=>String(b.actionTime).localeCompare(String(a.actionTime))));
   }
-  if (event === 'CHAT_CHECK_USER_EXIST') return result(peer,event,{status: !!db.users[username]});
-  if (event === 'CHAT_CHECK_USER_ONLINE') return result(peer,event,{status: userOnline(username)});
+  if (event === 'CHAT_CHECK_USER_EXIST') return result(peer,'CHECK_USER_EXIST',{status: !!db.users[username]});
+  if (event === 'CHAT_CHECK_USER_ONLINE') return result(peer,'CHECK_USER_ONLINE',{status: userOnline(username)});
   const name = String(data.name ?? '').trim();
   if (event === 'CREATE_ROOM') {
     if (!name || db.rooms[name]) return error(peer,event,'Tên phòng trống hoặc đã tồn tại.');
@@ -102,12 +102,13 @@ function handle(peer, raw) {
     if (!name) return error(peer,event,'Thiếu tên cuộc trò chuyện.');
     const room=db.rooms[name];
     const isRoom=!!room;
+    if (isRoom && !room) return error(peer,event,'Không tìm thấy phòng.');
     if (isRoom && !room.members.includes(peer.user)) return error(peer,event,'Bạn chưa tham gia phòng.');
     if (!isRoom && !db.users[name]) return error(peer,event,'Người dùng không tồn tại.');
     const page=Math.max(1,Number(data.page)||1);
     const messages=db.messages.filter(item=>isRoom?item.type===1 && item.to===name:item.type===0 && ((item.name===peer.user && item.to===name)||(item.name===name && item.to===peer.user)));
     const list=messages.slice(-page*50, messages.length-(page-1)*50 || undefined).slice(-50);
-    return result(peer,event,{name,user:isRoom?room.members.map((user,id)=>({id:id+1,name:user})):[],chatMess:list});
+    return result(peer,event,isRoom?{name,user:room.members.map((user,id)=>({id:id+1,name:user})),chatMess:list}:list);
   }
   if (event === 'SEND_CHAT') {
     const type = data.type === 'room' ? 1 : data.type === 'people' ? 0 : -1;

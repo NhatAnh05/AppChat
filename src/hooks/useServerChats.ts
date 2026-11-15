@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Conversation, Message } from '../data/previewContent';
 import { attachChatSocket, getError, getRecentChatCommands, sendChatEvent, subscribeChat, type ServerPacket } from '../services/chatSocket';
-import { makeTextMessageRequest } from '../services/chatProtocol';
+import { makeHistoryRequest, makeTextMessageRequest } from '../services/chatProtocol';
 import { messagePreview } from '../services/mediaMessages';
 import { belongsToConversation, parseChatHistory, parseServerChatMessage } from '../services/serverMessage';
 import { mergeServerHistory } from '../services/historyMerge';
@@ -36,6 +36,8 @@ export function useServerChats(username:string){
   const [messages,setMessages]=useState<Record<string,Message[]>>(()=>readCache(username).messages);
   const [error,setError]=useState('');
   const [busy,setBusy]=useState(false);
+  // Phân biệt kết nối WebSocket với khả năng tải lịch sử: GET_USER_LIST thành công không chứng minh API lịch sử có sẵn.
+  const [historyAvailability,setHistoryAvailability]=useState<'unknown'|'available'|'unsupported'>('unknown');
   const [online,setOnline]=useState<Record<string,boolean>>({});
   const [exists,setExists]=useState<Record<string,boolean>>({});
   const preferences=useRef(readConversationPreferences(username));
@@ -55,7 +57,7 @@ export function useServerChats(username:string){
   // Một server báo ACTION_NOT_EXIT cho event tải lịch sử thì không thử lại
   // event ấy trên mọi cuộc trò chuyện cho đến khi người dùng bấm thử thủ công.
   const historyCommandUnsupported=useRef(false);
-  // Production hiện có thể trả ACTION_NOT_EXIT cho CHAT_PEOPLE_GET_MES dù tài liệu có ghi lệnh này.
+  // Chỉ bật lại lịch sử khi người dùng thử thủ công nếu server thật trả ACTION_NOT_EXIT.
   // Tránh gọi lặp liên tục, nhưng cho phép người dùng thử lại thủ công.
   // Hạn chế tải lại lịch sử riêng từng hội thoại khi production trả ACTION_NOT_EXIT.
   const historyUnsupported=useRef<Set<string>>(new Set());
@@ -83,7 +85,8 @@ export function useServerChats(username:string){
     const job=historyQueue.current.shift()!;
     activeHistory.current=job;
     setBusy(true);
-    if(!safely('CHAT_PEOPLE_GET_MES',{name:job.id.split(':').slice(1).join(':'),page:job.page})){
+    const historyRequest=makeHistoryRequest(job.id.split(':').slice(1).join(':'),job.page,job.id.startsWith('room:'));
+    if(!safely(historyRequest.data.event,historyRequest.data.data)){
       activeHistory.current=null;setBusy(false);return;
     }
     // Avoid permanently blocking the next conversation when the server doesn't respond.
@@ -106,6 +109,7 @@ export function useServerChats(username:string){
     // Yêu cầu người dùng kích hoạt lại sau khi API từ chối; không mở lại polling tự động.
     historyUnsupported.current.delete(id);
     historyCommandUnsupported.current=false;
+    setHistoryAvailability('unknown');
     historyQueue.current=[];
     if(historyTimeout.current)clearTimeout(historyTimeout.current);
     historyTimeout.current=null;activeHistory.current=null;setBusy(false);setError('');
@@ -128,6 +132,8 @@ export function useServerChats(username:string){
         // yêu cầu lịch sử đang chờ và không có SEND_CHAT chưa xác nhận.
         if(isHistoryRejection && pending.current.length===0){
           historyCommandUnsupported.current=true;
+          setHistoryAvailability('unsupported');
+          setError('Máy chủ từ chối CHAT_PEOPLE_GET_MES (ACTION_NOT_EXIT). Chat realtime vẫn hoạt động; lịch sử chỉ còn trên trình duyệt đã lưu cục bộ cho đến khi API được bổ sung hoặc xác nhận lại.');
           if(activeHistory.current) historyUnsupported.current.add(activeHistory.current.id);
           historyQueue.current=[];
           finishHistory();
@@ -141,14 +147,19 @@ export function useServerChats(username:string){
           window.dispatchEvent(new Event('lyra:auth-expired'));
           return;
         }
-        if(packet.event==='CHAT_PEOPLE_GET_MES' || (packet.event==='ACTION_NOT_EXIT' && activeHistory.current))finishHistory();
+        // Lỗi phòng trong bảng API có thể trả event GET_ROOM_CHAT_MES dù request là CHAT_PEOPLE_GET_MES.
+        // Nhận diện biến thể đó CHỈ để dừng yêu cầu lịch sử phòng đang chờ, không gửi tên event sai.
+        const currentHistory=activeHistory.current;
+        const roomHistoryError=packet.event==='GET_ROOM_CHAT_MES' && currentHistory?.id.startsWith('room:');
+        if((packet.event==='CHAT_PEOPLE_GET_MES' || roomHistoryError) && currentHistory?.id.startsWith('room:')
+          && /not.*(room|member)|chưa tham gia/i.test(getError(packet))){
+          setRoomMembership(old=>({...old,[currentHistory.id]:false}));
+        }
+        if(packet.event==='CHAT_PEOPLE_GET_MES' || roomHistoryError || (packet.event==='ACTION_NOT_EXIT' && currentHistory))finishHistory();
         if(packet.event==='JOIN_ROOM')joiningRoom.current=null;
         if(packet.event==='SEND_CHAT' && /not in this room/i.test(getError(packet))){
           const last=pending.current[0];
           if(last?.conversationId.startsWith('room:'))setRoomMembership(old=>({...old,[last.conversationId]:false}));
-        }
-        if(packet.event==='CHAT_PEOPLE_GET_MES' && activeHistory.current?.id.startsWith('room:') && /not.*(room|member)|chưa tham gia/i.test(getError(packet))){
-          setRoomMembership(old=>({...old,[activeHistory.current!.id]:false}));
         }
         if(packet.event==='SEND_CHAT'){
           // SEND_CHAT lỗi thực sự: chỉ đánh dấu tin đang chờ là thất bại.
@@ -184,8 +195,10 @@ export function useServerChats(username:string){
       if(['CREATE_ROOM','JOIN_ROOM','OUT_ROOM'].includes(packet.event??''))refresh();
       if(packet.event==='CHAT_PEOPLE_GET_MES'){
         historyCommandUnsupported.current=false;
+        setHistoryAvailability('available');
         const job=activeHistory.current;
         if(!job)return; // unmatched late response: never attach it to another chat
+        // Cùng một event cho cả người dùng và phòng; activeHistory ánh xạ đáp ứng tuần tự.
         const payload=obj(data)?data:{};
         const explicitName=str(payload.name).trim();
         const expectedName=job.id.split(':').slice(1).join(':');
@@ -351,5 +364,5 @@ export function useServerChats(username:string){
     if(!item || !/^(unverified|failed):/.test(item.id))return false;
     return sendMessage(id,item.text??'');
   },[messages,sendMessage]);
-  return {conversations,messages,error,busy,online,exists,roomMembership,historyHasMore,refresh,loadHistory,loadOlderHistory,retryHistory,retryMessage,markRead,updateConversation,sendMessage,startPerson,createRoom,joinRoom,outRoom,checkPerson,clearError:()=>setError('')};
+  return {conversations,messages,error,busy,historyAvailability,online,exists,roomMembership,historyHasMore,refresh,loadHistory,loadOlderHistory,retryHistory,retryMessage,markRead,updateConversation,sendMessage,startPerson,createRoom,joinRoom,outRoom,checkPerson,clearError:()=>setError('')};
 }

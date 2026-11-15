@@ -368,6 +368,7 @@
 .ly-connection-state.offline,.ly-connection-state.signed-out {background:#ffeded;color:#a93f3f}
 .ly-connection-state.reconnecting {background:#fff2d8;color:#966419}
 .api-toolbar button:disabled {opacity:.48;cursor:not-allowed}
+.ly-history-unavailable { display:inline-flex;align-items:center;max-width:300px;padding:4px 8px;border:1px solid #e8ce91;border-radius:7px;background:#fff7dc;color:#785314;font-size:11px;line-height:1.45; }
 .ly-diagnostics {width:min(580px,92vw);max-height:80dvh;overflow:auto;display:flex;flex-direction:column;gap:12px}
 .ly-diagnostics p {font-size:12px;color:#667c73;line-height:1.6}
 .ly-diagnostics-log {overflow:auto;min-height:100px;max-height:45dvh;background:#f6f8f7;border:1px solid #e2ebe6;border-radius:10px;padding:12px;font:11px/1.8 ui-monospace,monospace}

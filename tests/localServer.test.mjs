@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const directory=mkdtempSync(join(tmpdir(),'lyra-test-'));
-const port=18888;
+const port=Number(process.env.CHAT_TEST_PORT || 18888);
 const url=`ws://127.0.0.1:${port}/chat/chat`;
 let child;
 async function start() {
@@ -19,7 +19,7 @@ async function start() {
 }
 async function stop(){if(!child)return;const old=child; child=null;old.kill();await new Promise(resolve=>old.once('exit',resolve));}
 async function connect(){return new Promise((resolve,reject)=>{const ws=new WebSocket(url);ws.addEventListener('open',()=>resolve(ws),{once:true});ws.addEventListener('error',reject,{once:true});});}
-async function request(ws,event,data={}) {return new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error(`Timeout: ${event}`)),2500);const handler=e=>{const packet=JSON.parse(e.data);if(packet.event!==event)return;clearTimeout(timeout);ws.removeEventListener('message',handler);resolve(packet);};ws.addEventListener('message',handler);ws.send(JSON.stringify({action:'onchat',data:{event,data}}));});}
+async function request(ws,event,data={},responseEvent=event) {return new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error(`Timeout: ${event} → ${responseEvent}`)),2500);const handler=e=>{const packet=JSON.parse(e.data);if(packet.event!==responseEvent)return;clearTimeout(timeout);ws.removeEventListener('message',handler);resolve(packet);};ws.addEventListener('message',handler);ws.send(JSON.stringify({action:'onchat',data:{event,data}}));});}
 function watch(ws,event){return new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error(`Broadcast timeout: ${event}`)),2500);const handler=e=>{const packet=JSON.parse(e.data);if(packet.event!==event)return;clearTimeout(timeout);ws.removeEventListener('message',handler);resolve(packet);};ws.addEventListener('message',handler);});}
 
 test('gửi/nhận 1-1, nhóm và lưu lịch sử qua restart',async()=>{
@@ -30,10 +30,12 @@ test('gửi/nhận 1-1, nhóm và lưu lịch sử qua restart',async()=>{
    assert.equal((await request(ws,'REGISTER',{user,pass})).status,'success');
    assert.equal((await request(ws,'LOGIN',{user,pass})).status,'success');
   }
+  assert.equal((await request(a,'CHAT_CHECK_USER_EXIST',{user:'LyraTestB'},'CHECK_USER_EXIST')).data.status,true);
+  assert.equal((await request(a,'CHAT_CHECK_USER_ONLINE',{user:'LyraTestB'},'CHECK_USER_ONLINE')).data.status,true);
   const receive=watch(b,'SEND_CHAT');
   assert.equal((await request(a,'SEND_CHAT',{type:'people',to:'LyraTestB',mes:'Một tin nhắn được lưu'})).status,'success');
   assert.equal((await receive).data.mes,'Một tin nhắn được lưu');
-  assert.equal((await request(b,'CHAT_PEOPLE_GET_MES',{name:'LyraTestA',page:1})).data.chatMess.length,1);
+  assert.equal((await request(b,'CHAT_PEOPLE_GET_MES',{name:'LyraTestA',page:1})).data.length,1);
   assert.equal((await request(a,'CREATE_ROOM',{name:'NhomTest'})).status,'success');
   assert.equal((await request(b,'JOIN_ROOM',{name:'NhomTest'})).status,'success');
   const group=watch(b,'SEND_CHAT');
@@ -44,7 +46,7 @@ test('gửi/nhận 1-1, nhóm và lưu lịch sử qua restart',async()=>{
   await start();const c=await connect();
   assert.equal((await request(c,'LOGIN',{user:'LyraTestB',pass:'abcdef'})).status,'success');
   const history=await request(c,'CHAT_PEOPLE_GET_MES',{name:'LyraTestA',page:1});
-  assert.equal(history.data.chatMess[0].mes,'Một tin nhắn được lưu');
+  assert.equal(history.data[0].mes,'Một tin nhắn được lưu');
   c.close();
  } finally {await stop();rmSync(directory,{recursive:true,force:true});}
 });
