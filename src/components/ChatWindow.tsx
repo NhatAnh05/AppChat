@@ -20,6 +20,20 @@ export default function ChatWindow({chat, currentUserId, onMessageSent,}: ChatWi
         void dispatch(fetchPeopleChatHistory({username: chat.name, chatId: chat.id, page: 1}))
     }, [chat?.id, chat?.kind, chat?.name, dispatch])
 
+    // WebSocket của API có thể không đẩy SEND_CHAT đến người nhận. Đồng bộ
+    // trang đầu định kỳ trong cuộc trò chuyện đang mở, kể cả khi đã tải trước đó.
+    useEffect(() => {
+        if (chat?.kind !== 'people') return;
+        const refresh = () => {
+            if (document.visibilityState === 'visible' && navigator.onLine) {
+                void dispatch(fetchPeopleChatHistory({username: chat.name, chatId: chat.id, page: 1, force: true}));
+            }
+        };
+        const interval = window.setInterval(refresh, 4500);
+        window.addEventListener('focus', refresh);
+        return () => { window.clearInterval(interval); window.removeEventListener('focus', refresh); };
+    }, [chat?.id, chat?.kind, chat?.name, dispatch]);
+
     if (!chat) {
         return (<main className="chat-window chat-window-empty">
                     <div className="empty-chat">

@@ -39,5 +39,10 @@ export async function uploadMedia(file: File, kind: LyraMediaKind): Promise<Lyra
   const publicBase = (import.meta.env.VITE_MEDIA_PUBLIC_BASE_URL || window.location.origin).replace(/\/$/, "");
   const url = new URL(data.path, publicBase).toString();
   if (!isSafeMediaUrl(url)) throw new Error("Địa chỉ file không an toàn. Máy chủ triển khai phải chạy HTTPS.");
+  // Link localhost chỉ hoạt động trên chính máy đang chạy media server.
+  // Từ máy hoặc điện thoại khác, URL này sẽ trỏ về thiết bị của người nhận.
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(?::|\/)/i.test(url) && !import.meta.env.DEV) {
+    throw new Error("Không thể gửi tệp bằng địa chỉ localhost khi triển khai. Cấu hình VITE_MEDIA_PUBLIC_BASE_URL trỏ tới máy chủ media HTTPS công khai.");
+  }
   return { kind, url, name: file.name, size: file.size };
 }

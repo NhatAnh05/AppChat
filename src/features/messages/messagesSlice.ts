@@ -14,7 +14,7 @@ interface MessagesState {
   historyByChat: Record<string, ConversationHistoryState>;
 }
 
-type FetchHistoryArgs = { username: string; chatId: string; page?: number };
+type FetchHistoryArgs = { username: string; chatId: string; page?: number; force?: boolean };
 type FetchHistoryResult = { chatId: string; page: number; messages: ChatMessage[] };
 
 export const fetchPeopleChatHistory = createAsyncThunk<
@@ -29,10 +29,10 @@ export const fetchPeopleChatHistory = createAsyncThunk<
     return rejectWithValue(error instanceof Error ? error.message : "Không thể tải lịch sử tin nhắn.");
   }
 }, {
-  condition: ({ chatId, page = 1 }, { getState }) => {
+  condition: ({ chatId, page = 1, force = false }, { getState }) => {
     const state = getState() as { messages: MessagesState };
     const history = state.messages.historyByChat[chatId];
-    return !history?.loading && !history?.loadedPages.includes(page);
+    return !history?.loading && (force || !history?.loadedPages.includes(page));
   },
 });
 

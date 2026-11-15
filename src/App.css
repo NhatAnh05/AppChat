@@ -271,3 +271,18 @@
 .chat-media { max-width:100%; }
 .media-file-link { display:inline-flex; gap:8px; align-items:center; overflow-wrap:anywhere; }
 @media(max-width:760px) { .media-actions { flex-wrap:wrap; max-width:98px; } .media-actions button { padding:4px; } }
+
+/* Nút + gộp ảnh, video, GIF và tệp; menu mở lên phía trên khung nhập. */
+.media-attach-anchor { position:relative; flex:0 0 auto; }
+.media-plus-toggle { width:40px; height:40px; display:grid; place-items:center; border:0; border-radius:50%; background:#e5f3ed; color:#205a4b; cursor:pointer; font-size:21px; transition:background .15s, transform .15s; }
+.media-plus-toggle:hover, .media-plus-toggle[aria-expanded="true"] { background:#cfe9df; }
+.media-plus-toggle:disabled { opacity:.5; cursor:wait; }
+.media-attach-menu { position:absolute; bottom:calc(100% + 12px); left:0; z-index:70; width:190px; padding:7px; border:1px solid #d5e6e0; border-radius:13px; background:#fff; box-shadow:0 12px 36px rgba(16,44,40,.22); }
+.media-attach-menu button { width:100%; display:flex; align-items:center; gap:13px; border:0; border-radius:9px; padding:11px 12px; background:transparent; color:#263b37; text-align:left; font-size:14px; cursor:pointer; }
+.media-attach-menu button i { font-size:19px; color:#245d4e; width:22px; text-align:center; }
+.media-attach-menu button:hover, .media-attach-menu button:focus-visible { background:#e9f5ef; outline:0; }
+.theme-dark .media-plus-toggle { background:#203d37; color:#b3e4d0; }
+.theme-dark .media-attach-menu { background:#17252a; border-color:#375450; }
+.theme-dark .media-attach-menu button { color:#e4e9e7; }
+.theme-dark .media-attach-menu button i { color:#b3e4d0; }
+.theme-dark .media-attach-menu button:hover { background:#29483f; }

@@ -18,6 +18,8 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent }: M
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedKind = useRef<LyraMediaKind>("file");
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [mediaMenuOpen, setMediaMenuOpen] = useState(false);
+  const mediaMenuRef = useRef<HTMLDivElement>(null);
   const emojiPanelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const emojis = ["😀", "😄", "😂", "🥰", "😍", "😊", "😉", "😎", "🥹", "😭", "😢", "😡", "👍", "👎", "👏", "🙏", "💪", "🤝", "❤️", "💚", "💛", "🎉", "🔥", "✨", "👋", "✅", "💯", "🌸", "🌿", "🍀"];
@@ -37,6 +39,22 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent }: M
       document.removeEventListener("keydown", handleEscape);
     };
   }, [emojiOpen]);
+
+  useEffect(() => {
+    if (!mediaMenuOpen) return;
+    const closeWhenOutside = (event: PointerEvent) => {
+      if (!mediaMenuRef.current?.contains(event.target as Node)) setMediaMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMediaMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeWhenOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeWhenOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [mediaMenuOpen]);
 
   const insertEmoji = (emoji: string) => {
     const input = inputRef.current;
@@ -85,6 +103,7 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent }: M
   };
 
   const chooseMedia = (kind: LyraMediaKind) => {
+    setMediaMenuOpen(false);
     selectedKind.current = kind;
     if (fileInputRef.current) {
       fileInputRef.current.accept = kind === "image" ? "image/*" : kind === "video" ? "video/*" : kind === "gif" ? "image/gif" : ".pdf,.txt,.csv,.zip,.docx,.xlsx,.pptx,image/*,video/*";
@@ -107,11 +126,27 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent }: M
   return (
     <form className="message-input-container" onSubmit={handleSubmit}>
       <input ref={fileInputRef} type="file" hidden onChange={e => void handleMediaFile(e.target.files?.[0])} />
-      <div className="media-actions">
-        <button type="button" title="Gửi ảnh" disabled={uploading} onClick={() => chooseMedia("image")}><i className="bi bi-image" /></button>
-        <button type="button" title="Gửi video" disabled={uploading} onClick={() => chooseMedia("video")}><i className="bi bi-camera-video" /></button>
-        <button type="button" title="Gửi tệp" disabled={uploading} onClick={() => chooseMedia("file")}><i className="bi bi-paperclip" /></button>
-        <button type="button" title="Gửi GIF" disabled={uploading} onClick={() => chooseMedia("gif")}>GIF</button>
+      <div className="media-attach-anchor" ref={mediaMenuRef}>
+        <button
+          type="button"
+          className="media-plus-toggle"
+          title="Đính kèm ảnh, video, GIF hoặc tệp"
+          aria-label="Thêm nội dung đính kèm"
+          aria-haspopup="menu"
+          aria-expanded={mediaMenuOpen}
+          disabled={uploading}
+          onClick={() => { setEmojiOpen(false); setMediaMenuOpen(open => !open); }}
+        >
+          <i className={`bi ${mediaMenuOpen ? "bi-x-lg" : "bi-plus-lg"}`} aria-hidden="true" />
+        </button>
+        {mediaMenuOpen && (
+          <div className="media-attach-menu" role="menu" aria-label="Chọn loại tệp đính kèm">
+            <button type="button" role="menuitem" onClick={() => chooseMedia("image")}> <i className="bi bi-image" aria-hidden="true" /> <span>Hình ảnh</span> </button>
+            <button type="button" role="menuitem" onClick={() => chooseMedia("video")}> <i className="bi bi-camera-video" aria-hidden="true" /> <span>Video</span> </button>
+            <button type="button" role="menuitem" onClick={() => chooseMedia("gif")}> <i className="bi bi-filetype-gif" aria-hidden="true" /> <span>GIF</span> </button>
+            <button type="button" role="menuitem" onClick={() => chooseMedia("file")}> <i className="bi bi-paperclip" aria-hidden="true" /> <span>Tệp</span> </button>
+          </div>
+        )}
       </div>
       <div className="emoji-picker-anchor" ref={emojiPanelRef}>
         <button

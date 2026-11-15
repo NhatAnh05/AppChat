@@ -9,7 +9,7 @@ const LEGACY_PREFIX = "LYRAU8_";
 const TOKEN = /LYE([0-9a-f]{4,6})X/g;
 
 function needsEscaping(codePoint: number): boolean {
-  return codePoint > 0xffff || codePoint === 0xfe0f || codePoint === 0xfe0e ||
+  return codePoint > 0xffff || codePoint === 0x2764 || codePoint === 0x263a || codePoint === 0xfe0f || codePoint === 0xfe0e ||
     codePoint === 0x200d || codePoint === 0x20e3;
 }
 
