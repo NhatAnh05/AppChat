@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Info, RefreshCw, Wifi, WifiOff, X, ClipboardList } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Info, RefreshCw, Wifi, WifiOff, X, ClipboardList, Download, Upload } from 'lucide-react';
 import { useServerChats } from './hooks/useServerChats';
 import { disconnectLoginSession, restoreLoginSession, retryConnectionNow, type LoginSession } from './services/loginService';
 import { getChatDiagnostics } from './services/chatSocket';
@@ -35,6 +35,37 @@ function LoggedIn({ session, onExit }: {session:LoginSession;onExit:(message?: s
   const [loggingOut,setLoggingOut] = useState(false);
   const [connection,setConnection] = useState(getConnectionState);
   const [showDiagnostics,setShowDiagnostics] = useState(false);
+  const historyFileRef = useRef<HTMLInputElement>(null);
+  const backupHistory = () => {
+    try {
+      const content = api.exportHistoryBackup();
+      const blob = new Blob([content], {type:'application/json;charset=utf-8'});
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      const safeUsername = session.username.replace(/[^\p{L}\p{N}_-]/gu, '_');
+      anchor.href = url;
+      anchor.download = `LyraChat-history-${safeUsername}-${new Date().toISOString().slice(0,10)}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);
+      setNotice('Đã tạo bản sao lịch sử cục bộ. File chứa nội dung trò chuyện: hãy giữ riêng tư, không đưa lên GitHub.');
+    } catch (reason) {
+      setNotice(reason instanceof Error ? reason.message : 'Không thể tạo file sao lưu.');
+    }
+  };
+  const restoreHistoryFromFile = async (file:File|undefined) => {
+    if (!file) return;
+    try {
+      if (file.size > 8*1024*1024) throw new Error('File sao lưu vượt quá giới hạn 8 MB.');
+      const result = api.importHistoryBackup(await file.text());
+      setNotice(`Đã nhập bản sao cục bộ: ${result.conversations} hội thoại, ${result.messages} tin trong file. Tin nhập chưa được xác nhận trên server.`);
+    } catch (reason) {
+      setNotice(reason instanceof Error ? reason.message : 'Không thể đọc file sao lưu.');
+    } finally {
+      if (historyFileRef.current) historyFileRef.current.value = '';
+    }
+  };
   useEffect(()=>subscribeConnectionState(setConnection),[]);
   const chat=api.conversations.find(item=>item.id===selected);
   const roomBlocked=Boolean(chat?.group && api.roomMembership[chat.id]===false);
@@ -67,7 +98,7 @@ function LoggedIn({ session, onExit }: {session:LoginSession;onExit:(message?: s
     <ChatPanel key={`${session.username}:${selected}`} draftNamespace={session.username} canSend={connection==='connected'} chat={chat} roomBlocked={roomBlocked} onJoinRoom={joinSelectedRoom} messages={api.messages[selected]??[]} onSend={value=>api.sendMessage(selected,value)} forwardTargets={api.conversations} onForward={(targetId,value)=>api.sendMessage(targetId,value)} onRetryMessage={messageId=>api.retryMessage(selected,messageId)} onEdit={()=>window.alert('Máy chủ chưa cung cấp API sửa tin nhắn.')} onDelete={()=>window.alert('Máy chủ chưa cung cấp API xóa tin nhắn.')} onBack={()=>setMobileChat(false)} onDetails={()=>setDetails(value=>!value)} onOpenCallPreview={()=>open('call')} onManageGroup={()=>open('join')}/>
     {details && chat && <DetailsPanel chat={chat} onClose={()=>setDetails(false)} onManageGroup={()=>open('join')}/>}
     {(api.error || notice || api.busy) && <div className="api-status" role="status">{api.error || notice || (api.busy?'Đang tải tin nhắn từ máy chủ…':'')} <button type="button" onClick={()=>{api.clearError();setNotice('');}}>×</button></div>}
-    <div className="api-toolbar"><span role="status" className={`ly-connection-state ${connection}`} aria-live="polite">{connection==='connected'?<Wifi size={13}/>:<WifiOff size={13}/>} {connection==='connected'?'Đã kết nối API':connection==='reconnecting'?'Đang kết nối lại…':connection==='offline'?'Mất kết nối':connection==='signing-out'?'Đang đăng xuất…':'Chưa đăng nhập'}</span>{api.historyAvailability==='unsupported' && <span className="ly-history-unavailable" role="status" title="Server trả ACTION_NOT_EXIT cho CHAT_PEOPLE_GET_MES. Tin đang thấy trên thiết bị này không chứng minh đã đồng bộ lịch sử.">⚠ API chưa hỗ trợ tải lịch sử</span>}{(connection==='offline'||connection==='reconnecting') && <button type="button" onClick={()=>retryConnectionNow(()=>window.dispatchEvent(new Event('lyra:auth-expired')))}>Kết nối lại</button>}<button type="button" disabled={connection!=='connected'} onClick={api.refresh}><RefreshCw size={15}/> Làm mới hội thoại</button>{chat?.group && !roomBlocked && <button type="button" onClick={()=>{if(window.confirm(`Rời phòng ${chat.name}?`)){api.outRoom(chat.id);setSelected('');}}}>Rời phòng</button>}{chat && <button type="button" onClick={()=>api.retryHistory(chat.id,1)}>Thử tải lại lịch sử</button>}{chat && api.historyAvailability!=='unsupported' && api.historyHasMore[chat.id]!==false && <button type="button" disabled={api.busy || connection!=='connected'} onClick={()=>api.loadOlderHistory(chat.id)}>Tải thêm tin nhắn cũ</button>}{roomBlocked && <button type="button" onClick={joinSelectedRoom}>Tham gia phòng này</button>}<button type="button" onClick={()=>setShowDiagnostics(true)}><ClipboardList size={13}/> Nhật ký API</button></div>
+    <div className="api-toolbar"><span role="status" className={`ly-connection-state ${connection}`} aria-live="polite">{connection==='connected'?<Wifi size={13}/>:<WifiOff size={13}/>} {connection==='connected'?'Đã kết nối API':connection==='reconnecting'?'Đang kết nối lại…':connection==='offline'?'Mất kết nối':connection==='signing-out'?'Đang đăng xuất…':'Chưa đăng nhập'}</span>{api.historyAvailability==='unsupported' && <span className="ly-history-unavailable" role="status" title="Server trả ACTION_NOT_EXIT cho CHAT_PEOPLE_GET_MES. Tin đang thấy trên thiết bị này không chứng minh đã đồng bộ lịch sử.">⚠ Server từ chối tải lịch sử</span>}{(connection==='offline'||connection==='reconnecting') && <button type="button" onClick={()=>retryConnectionNow(()=>window.dispatchEvent(new Event('lyra:auth-expired')))}>Kết nối lại</button>}<button type="button" disabled={connection!=='connected'} onClick={api.refresh}><RefreshCw size={15}/> Làm mới hội thoại</button>{chat?.group && !roomBlocked && <button type="button" onClick={()=>{if(window.confirm(`Rời phòng ${chat.name}?`)){api.outRoom(chat.id);setSelected('');}}}>Rời phòng</button>}{chat && <button type="button" onClick={()=>api.retryHistory(chat.id,1)}>Thử tải lại lịch sử</button>}{chat && api.historyAvailability!=='unsupported' && api.historyHasMore[chat.id]!==false && <button type="button" disabled={api.busy || connection!=='connected'} onClick={()=>api.loadOlderHistory(chat.id)}>Tải thêm tin nhắn cũ</button>}{roomBlocked && <button type="button" onClick={joinSelectedRoom}>Tham gia phòng này</button>}<button type="button" onClick={backupHistory} title="Xuất bản sao lịch sử trên trình duyệt này thành JSON; không phải đồng bộ server"><Download size={13}/> Sao lưu lịch sử</button><input ref={historyFileRef} type="file" accept=".json,application/json" style={{display:'none'}} aria-label="Chọn file lịch sử LyraChat" onChange={e=>void restoreHistoryFromFile(e.target.files?.[0])}/><button type="button" onClick={()=>historyFileRef.current?.click()} title="Khôi phục bản sao lịch sử cùng tài khoản từ file JSON"><Upload size={13}/> Nhập lịch sử</button><button type="button" onClick={()=>setShowDiagnostics(true)}><ClipboardList size={13}/> Nhật ký API</button></div>
     {showDiagnostics && <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setShowDiagnostics(false);}}><div role="dialog" aria-modal="true" aria-label="Nhật ký API" className="modal ly-diagnostics"><div className="modal-heading"><div><span className="eyebrow">CHẨN ĐOÁN WEBSOCKET</span><h2>Nhật ký kết nối API</h2></div><button type="button" className="icon-button" onClick={()=>setShowDiagnostics(false)} aria-label="Đóng"><X size={20}/></button></div><p>Chỉ ghi thời điểm, tên event và trạng thái; không ghi nội dung tin nhắn, mật khẩu hay mã đăng nhập.</p><div className="ly-diagnostics-log">{getChatDiagnostics().slice().reverse().map((entry,i)=><div key={i}><time>{new Date(entry.at).toLocaleTimeString('vi-VN')}</time> {entry.direction==='send'?'GỬI':'NHẬN'} <strong>{entry.event}</strong> <span>{entry.status||'–'}</span></div>)}</div><button className="group-submit" type="button" onClick={()=>void navigator.clipboard?.writeText(getChatDiagnostics().map(entry=>`${new Date(entry.at).toISOString()} ${entry.direction} ${entry.event} ${entry.status||''}`).join('\n'))}>Sao chép nhật ký đã ẩn dữ liệu nhạy cảm</button></div></div>}
     {modal==='settings' && <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget && !loggingOut)setModal(null);}}><AccountSettingsDialog username={session.username} settings={chatSettings} onSettingsChange={updateChatSettings} onLogout={logout} loggingOut={loggingOut} onClose={()=>{if(!loggingOut)setModal(null);}}/></div>}
     {modal && modal!=='settings' && <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setModal(null);}}><div className="modal" role="dialog" aria-modal="true" aria-label="Thao tác LyraChat">

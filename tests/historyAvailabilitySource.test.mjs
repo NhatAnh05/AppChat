@@ -16,5 +16,5 @@ test('Khi backend từ chối lịch sử, dừng tự động thử và báo r�
 });
 test('Giao diện phân biệt kết nối API với tải lịch sử', () => {
   assert.match(app, /api\.historyAvailability==='unsupported'/);
-  assert.match(app, /API chưa hỗ trợ tải lịch sử/);
+  assert.match(app, /Server từ chối tải lịch sử/);
 });

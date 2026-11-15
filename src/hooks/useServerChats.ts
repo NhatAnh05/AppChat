@@ -3,8 +3,9 @@ import type { Conversation, Message } from '../data/previewContent';
 import { attachChatSocket, getError, getRecentChatCommands, sendChatEvent, subscribeChat, type ServerPacket } from '../services/chatSocket';
 import { makeHistoryRequest, makeTextMessageRequest } from '../services/chatProtocol';
 import { messagePreview } from '../services/mediaMessages';
-import { belongsToConversation, parseChatHistory, parseServerChatMessage } from '../services/serverMessage';
+import { belongsToConversation, parseChatHistory, parseServerChatMessage, resolveRealtimeConversationId, sameChatUser } from '../services/serverMessage';
 import { mergeServerHistory } from '../services/historyMerge';
+import { mergeHistoryBackup, parseHistoryBackup, serializeHistoryBackup } from '../services/historyBackup';
 import { readConversationPreferences, saveConversationPreferences } from '../services/conversationStorage';
 
 type ApiMessage = { id?: unknown; name?: unknown; to?: unknown; mes?: unknown; createAt?: unknown; type?: unknown };
@@ -18,7 +19,7 @@ const now = () => new Date().toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'
 const normalized = (item:ApiMessage,user:string,group:boolean,index:number):Message => ({
   // API SEND_CHAT có thể không trả id/createAt; không dùng cùng một id giả cho mọi tin realtime.
   id:item.id != null ? str(item.id) : `server:${str(item.name)}:${str(item.to)}:${str(item.createAt)}:${index}:${str(item.mes)}`,
-  text:str(item.mes),fromMe:str(item.name)===user,time:clock(item.createAt),
+  text:str(item.mes),fromMe:sameChatUser(str(item.name),user),time:clock(item.createAt),
   ...(item.createAt && Number.isFinite(new Date(str(item.createAt).replace(' ','T')).getTime()) ? {createdAt:new Date(str(item.createAt).replace(' ','T')).toISOString()} : {}),
   ...(group && str(item.name)!==user ? {replyTo:`Người gửi: ${str(item.name)}`} : {}),
 });
@@ -47,6 +48,8 @@ export function useServerChats(username:string){
   const [roomMembership,setRoomMembership]=useState<Record<string,boolean>>({});
   const joiningRoom=useRef<string|null>(null);
   const selected=useRef('');
+  const conversationIds=useRef<string[]>(conversations.map(c=>c.id));
+  useEffect(()=>{conversationIds.current=conversations.map(c=>c.id);},[conversations]);
   const pending=useRef<Pending[]>([]);
   const lastSentAt=useRef(0);
   const historyQueue=useRef<HistoryJob[]>([]);
@@ -77,6 +80,18 @@ export function useServerChats(username:string){
     catch(reason){setError(reason instanceof Error?reason.message:'Kết nối WebSocket không khả dụng.');return false;}
   },[]);
   const refresh=useCallback(()=>safely('GET_USER_LIST'),[safely]);
+
+  // Portable LOCAL backup for cases where the lecturer's API cannot return
+  // history yet. Does not claim server synchronization or delivery receipts.
+  const exportHistoryBackup=useCallback(()=>serializeHistoryBackup(username,{conversations,messages}),[username,conversations,messages]);
+  const importHistoryBackup=useCallback((content:string)=>{
+    const imported=parseHistoryBackup(content,username);
+    const merged=mergeHistoryBackup({conversations,messages},imported);
+    const importedCount=Object.values(imported.messages).reduce((total,list)=>total+list.length,0);
+    setConversations(merged.conversations);
+    setMessages(merged.messages);
+    return {conversations:imported.conversations.length,messages:importedCount};
+  },[username,conversations,messages]);
   const advanceHistory=useCallback(()=>{
     if(historyCommandUnsupported.current || activeHistory.current || historyQueue.current.length===0)return;
     // Skip only unsupported conversations instead of stopping history for everyone.
@@ -133,7 +148,7 @@ export function useServerChats(username:string){
         if(isHistoryRejection && pending.current.length===0){
           historyCommandUnsupported.current=true;
           setHistoryAvailability('unsupported');
-          setError('Máy chủ từ chối CHAT_PEOPLE_GET_MES (ACTION_NOT_EXIT). Chat realtime vẫn hoạt động; lịch sử chỉ còn trên trình duyệt đã lưu cục bộ cho đến khi API được bổ sung hoặc xác nhận lại.');
+          setError('Máy chủ từ chối CHAT_PEOPLE_GET_MES (ACTION_NOT_EXIT). Bạn có thể xuất/nhập bản sao lịch sử giữa các trình duyệt; đồng bộ tự động phải chờ API phía máy chủ hoạt động.');
           if(activeHistory.current) historyUnsupported.current.add(activeHistory.current.id);
           historyQueue.current=[];
           finishHistory();
@@ -245,11 +260,16 @@ export function useServerChats(username:string){
       }
       if(packet.event==='SEND_CHAT' && obj(data)){
         const incoming=parseServerChatMessage(data);
-        if(!incoming)return;
-        const sender=incoming.name,target=incoming.to,content=incoming.mes,group=incoming.type===1;
-        const id=key(group?target:sender===username?target:sender,group);
-        if(!belongsToConversation(incoming,username,id))return;
-        const idx=sender===username && packet.status==='success' ?pending.current.findIndex(p=>p.conversationId===id && p.text===content):-1;
+        if(!incoming){
+          console.warn('[LyraChat] SEND_CHAT không có đủ name/to/mes; không thể hiển thị như một tin nhắn.');
+          return;
+        }
+        const sender=incoming.name,content=incoming.mes,group=incoming.type===1;
+        // Dùng id hội thoại đã có (GET_USER_LIST/cache) thay vì tạo id khác khi
+        // server thay đổi chữ hoa/chữ thường trong username, ví dụ TuanAnh/tuananh.
+        const id=resolveRealtimeConversationId(incoming,username,conversationIds.current);
+        if(!id)return;
+        const idx=sameChatUser(sender,username) && packet.status==='success' ?pending.current.findIndex(p=>p.conversationId===id && p.text===content):-1;
         const matched=idx>=0?pending.current.splice(idx,1)[0]:undefined;
         const item=normalized(incoming,username,group,0);
         // Không tái sử dụng id giả của phản hồi thiếu id/createAt: mỗi tin mới là một sự kiện riêng.
@@ -265,7 +285,7 @@ export function useServerChats(username:string){
         });
         setConversations(old=>{
           const existing=old.find(c=>c.id===id);
-          const itemChat:Conversation={...(existing??toChat(id.split(':').slice(1).join(':'),group)),preview:messagePreview(content),time:item.time||now(),unread:selected.current===id && document.visibilityState==='visible' && document.hasFocus()?0:(existing?.unread??0)+(sender===username?0:1)};
+          const itemChat:Conversation={...(existing??toChat(id.split(':').slice(1).join(':'),group)),preview:messagePreview(content),time:item.time||now(),unread:selected.current===id && document.visibilityState==='visible' && document.hasFocus()?0:(existing?.unread??0)+(sameChatUser(sender,username)?0:1)};
           return [itemChat,...old.filter(c=>c.id!==id)];
         });
       }
@@ -364,5 +384,5 @@ export function useServerChats(username:string){
     if(!item || !/^(unverified|failed):/.test(item.id))return false;
     return sendMessage(id,item.text??'');
   },[messages,sendMessage]);
-  return {conversations,messages,error,busy,historyAvailability,online,exists,roomMembership,historyHasMore,refresh,loadHistory,loadOlderHistory,retryHistory,retryMessage,markRead,updateConversation,sendMessage,startPerson,createRoom,joinRoom,outRoom,checkPerson,clearError:()=>setError('')};
+  return {conversations,messages,error,busy,historyAvailability,online,exists,roomMembership,historyHasMore,exportHistoryBackup,importHistoryBackup,refresh,loadHistory,loadOlderHistory,retryHistory,retryMessage,markRead,updateConversation,sendMessage,startPerson,createRoom,joinRoom,outRoom,checkPerson,clearError:()=>setError('')};
 }
