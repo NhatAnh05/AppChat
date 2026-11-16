@@ -1,5 +1,5 @@
 import { parseChatTime, formatChatTime } from "./utils/chatTime";
-import {useEffect, useMemo, useState} from "react";
+import {useEffect, useMemo, useState, type FormEvent} from "react";
 import {useDispatch, useSelector, useStore} from "react-redux";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { ChatList } from "./components/ChatList";
@@ -11,7 +11,6 @@ import { Register } from "./components/Register";
 import ChatWindow from "./components/ChatWindow";
 import {clearCredentials, setCredentials,} from "./features/auth/authSlice";
 import { AuthInitializer } from "./features/auth/AuthInitializer";
-import { authService } from "./services/authService";
 import { contactService } from "./services/contactService";
 import type { UserListItem } from "./services/contactService";
 import {setContactsError, setContactsLoading, setFriends, setGroups,} from "./features/contacts/contactsSlice";
@@ -23,6 +22,9 @@ import type { ContactEntry } from "./types/contact";
 import "./App.css";
 import { decodeChatContent } from "./services/chatContentCodec";
 import {userService} from "./services/userService.ts";
+import { logoutCurrentSession } from "./services/logoutService.ts";
+import { clearContacts } from "./features/contacts/contactsSlice";
+import { subscribeConnectionState } from "./services/connectionHealth.ts";
 
 function mapUserToContact(item: UserListItem, type: "friend" | "group"): ContactEntry {
     return {
@@ -57,12 +59,15 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const [query, setQuery] = useState("");
     const [composeOpen, setComposeOpen] = useState(false);
     const [composeValue, setComposeValue] = useState("");
+    const [composeBusy, setComposeBusy] = useState(false);
+    const [composeError, setComposeError] = useState("");
+    const [logoutBusy, setLogoutBusy] = useState(false);
     const [apiLogOpen, setApiLogOpen] = useState(false);
     const [apiLogs, setApiLogs] = useState<ApiLogEntry[]>([]);
     const [connectionStatus, setConnectionStatus] = useState<WebSocketState>(websocketService.getStatus());
-    const [pinnedIds, setPinnedIds] = useState<string[]>(() => {
-      try { return JSON.parse(localStorage.getItem(`lyra-pins-${currentUserId}`) || "[]") as string[]; }
-      catch { return []; }
+    const [pinnedIds] = useState<string[]>(() => {
+        try { return JSON.parse(localStorage.getItem(`lyra-pins-${currentUserId}`) || "[]") as string[]; }
+        catch { return []; }
     });
     const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
     const [activeSection, setActiveSection] = useState("Tin nhắn");
@@ -74,6 +79,12 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const friends = useSelector((state: RootState) => state.contacts.friends);
     const groups = useSelector((state: RootState) => state.contacts.groups);
     useEffect(() => websocketService.onStatus(setConnectionStatus), []);
+    useEffect(() => subscribeConnectionState(state => {
+        if (state === 'signed-out') {
+            dispatch(clearCredentials());
+            navigate('/login', {replace:true});
+        }
+    }), [dispatch, navigate]);
     useEffect(() => websocketService.onLog(entry => setApiLogs(current => [...current.slice(-199), entry])), []);
     useEffect(() => localStorage.setItem(`lyra-pins-${currentUserId}`, JSON.stringify(pinnedIds)), [pinnedIds, currentUserId]);
     const messages = useSelector((state: RootState) => state.messages.messages);
@@ -113,6 +124,13 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         }));
     }), [currentUserId, dispatch, friends]);
 
+    // Socket sau RE_LOGIN là một socket mới: cập nhật danh bạ từ Backend khi kết nối hồi phục.
+    useEffect(() => {
+        if (connectionStatus === 'CONNECTED') void refreshUserList();
+        // Callback intentionally uses the latest store when invoked.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [connectionStatus]);
+
     // Nạp trước lịch sử trang đầu để danh sách chat có preview và thời gian ngay khi mở ứng dụng.
     useEffect(() => {
         friends.forEach((friend) => {
@@ -140,6 +158,8 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     }, [friends, groups, selectedChat]);
 
     const refreshUserList = async () => {
+        dispatch(setContactsLoading(true));
+        dispatch(setContactsError(null));
         try {
             const items = await contactService.getUserList();
 
@@ -170,7 +190,11 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             dispatch(setGroups(serverGroups));
 
         } catch (error) {
+            const message = error instanceof Error ? error.message : "Không tải được danh bạ.";
+            dispatch(setContactsError(message));
             console.error("Không thể cập nhật danh sách:", error);
+        } finally {
+            dispatch(setContactsLoading(false));
         }
     };
 
@@ -203,15 +227,35 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             );
     }, [chats, messages, currentUserId, query]);
 
-    const handleLogout = () => {
+    const handleLogout = async () => {
+        if (logoutBusy) return;
+        setLogoutBusy(true);
         try {
-            authService.logout();
-        } catch {
-            // Xóa xác thực cục bộ ngay cả khi WebSocket không khả dụng.
+            const result = await logoutCurrentSession();
+            if (!result.backendConfirmed) {
+                console.warn(`Đã đăng xuất cục bộ; backend chưa xác nhận (${result.reason}).`);
+            }
+        } finally {
+            dispatch(clearCredentials());
+            dispatch(clearContacts());
+            navigate("/login", { replace: true });
+            setLogoutBusy(false);
         }
+    };
 
-        dispatch(clearCredentials());
-        navigate("/login", { replace: true });
+    const handleComposeSubmit = async (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        const value = composeValue.trim();
+        if (!value || composeBusy) return;
+        setComposeBusy(true);
+        setComposeError("");
+        try {
+            await handleSearchUser(value);
+            setComposeOpen(false);
+            setComposeValue("");
+        } catch (error) {
+            setComposeError(error instanceof Error ? error.message : "Không thể bắt đầu trò chuyện.");
+        } finally { setComposeBusy(false); }
     };
 
     useEffect(() => {
@@ -366,9 +410,11 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     return (
         <main className={`app-shell lyra-workspace ${theme === "dark" ? "theme-dark" : ""} ${activeSection === "Danh bạ" ? "contacts-view" : ""}`}>
             <Sidebar activeSection={activeSection} onSectionChange={(section) => {setSettingsOpen(false);setActiveSection(section); if(section !== "Cài đặt")setSelectedChat(null);}} settingsOpen={settingsOpen}
-                onSettingsToggle={() => {setSettingsOpen(true);setActiveSection("Cài đặt");}} onLogout={handleLogout}/>
+                     onSettingsToggle={() => {setSettingsOpen(true);setActiveSection("Cài đặt");}} onLogout={handleLogout}/>
 
-            {activeSection === "Cài đặt" ? <SettingsDialog theme={theme} onThemeChange={setTheme} onLogout={handleLogout} onClose={() => {setSettingsOpen(false);setActiveSection("Tin nhắn");}} /> : activeSection === "Danh bạ" ? <ContactDirectory /> : <>
+            {activeSection === "Cài đặt" ? <SettingsDialog theme={theme} onThemeChange={setTheme} onLogout={handleLogout} onClose={() => {setSettingsOpen(false);setActiveSection("Tin nhắn");}} /> : activeSection === "Danh bạ" ? <ContactDirectory
+                onRefresh={() => { void refreshUserList(); }}
+            /> : <>
                 <ChatList
                     chats={activeSection === "Nhóm" ? filteredChats.filter(chat => chat.kind === "group") : activeSection === "Thư mục" ? filteredChats.filter(chat => pinnedIds.includes(chat.id)) : activeSection === "Cuộc gọi" ? [] : filteredChats}
                     selectedId={selectedChat?.id}
@@ -377,16 +423,16 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                     onQueryChange={setQuery}
                     onSearchUser={handleSearchUser}
                     searchingUser={searchingUser}
-                    onCompose={() => setComposeOpen(true)}
+                    onCompose={() => {setComposeValue("");setComposeError("");setComposeOpen(true);}}
                 />
                 <section className="conversation-panel" aria-label="Nội dung cuộc trò chuyện">
                     {activeSection === "Cuộc gọi" ? <div className="feature-placeholder"><i className="bi bi-telephone"/><h2>Cuộc gọi</h2><p>Máy chủ hiện chưa cung cấp API gọi thoại/video. Không thể thực hiện cuộc gọi thực.</p></div>
-                      : activeSection === "Nhóm" && !selectedChat ? <div className="feature-placeholder"><i className="bi bi-people"/><h2>Nhóm trò chuyện</h2><p>Các nhóm được lấy từ danh sách máy chủ. Gửi tin nhắn nhóm yêu cầu API nhóm riêng.</p></div>
-                      : activeSection === "Thư mục" && !selectedChat ? <div className="feature-placeholder"><i className="bi bi-folder2-open"/><h2>Thư mục đã lưu</h2><p>Mở cuộc trò chuyện ở mục Tin nhắn và bấm “Lưu vào thư mục” để đánh dấu ngay trên trình duyệt này.</p></div>
-                      : <>
-                        
-                        <ChatWindow chat={selectedChat} currentUserId={currentUserId} onMessageSent={refreshUserList}/>
-                      </>}
+                        : activeSection === "Nhóm" && !selectedChat ? <div className="feature-placeholder"><i className="bi bi-people"/><h2>Nhóm trò chuyện</h2><p>Các nhóm được lấy từ danh sách máy chủ. Gửi tin nhắn nhóm yêu cầu API nhóm riêng.</p></div>
+                            : activeSection === "Thư mục" && !selectedChat ? <div className="feature-placeholder"><i className="bi bi-folder2-open"/><h2>Thư mục đã lưu</h2><p>Mở cuộc trò chuyện ở mục Tin nhắn và bấm “Lưu vào thư mục” để đánh dấu ngay trên trình duyệt này.</p></div>
+                                : <>
+
+                                    <ChatWindow chat={selectedChat} currentUserId={currentUserId} onMessageSent={refreshUserList}/>
+                                </>}
                     <div className="lyra-status-dock">
                         <span className={`api-state ${connectionStatus === "CONNECTED" ? "connected" : ""}`}><i className="bi bi-wifi"/> {connectionStatus === "CONNECTED" ? "Đã kết nối API" : connectionStatus === "CONNECTING" ? "Đang kết nối" : "Mất kết nối API"}</span>
                         <button onClick={() => void refreshChats()}><i className="bi bi-arrow-repeat"/> Làm mới hội thoại</button>
@@ -396,11 +442,13 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                     </div>
                 </section>
             </>}
-            {composeOpen && <div className="lyra-modal-backdrop" onMouseDown={(e) => {if (e.target === e.currentTarget) setComposeOpen(false);}}>
-                <form className="lyra-modal" onSubmit={event => {event.preventDefault(); if (!composeValue.trim()) return; void handleSearchUser(composeValue.trim()); setComposeOpen(false); setComposeValue("");}}>
-                    <h2>Tạo cuộc trò chuyện</h2><p>Nhập username của tài khoản đang tồn tại trên máy chủ.</p>
-                    <input autoFocus value={composeValue} onChange={event => setComposeValue(event.target.value)} placeholder="Nhập username" required/>
-                    <div className="lyra-modal-actions"><button type="button" onClick={() => setComposeOpen(false)}>Hủy</button><button type="submit">Bắt đầu trò chuyện</button></div>
+            {composeOpen && <div className="lyra-modal-backdrop" onMouseDown={(e) => {if (e.target === e.currentTarget && !composeBusy) setComposeOpen(false);}}>
+                <form className="lyra-modal" onSubmit={event => {void handleComposeSubmit(event);}}>
+                    <h2>Tạo cuộc trò chuyện</h2>
+                    <p>Nhập username đã tồn tại trên máy chủ để bắt đầu trò chuyện cá nhân.</p>
+                    <input autoFocus value={composeValue} onChange={event => setComposeValue(event.target.value)} placeholder="Username" required/>
+                    {composeError && <p role="alert" className="login-error">{composeError}</p>}
+                    <div className="lyra-modal-actions"><button type="button" disabled={composeBusy} onClick={() => setComposeOpen(false)}>Hủy</button><button type="submit" disabled={composeBusy}>{composeBusy ? "Đang xử lý..." : "Bắt đầu trò chuyện"}</button></div>
                 </form>
             </div>}
             {apiLogOpen && <div className="lyra-modal-backdrop" onMouseDown={e => {if (e.target === e.currentTarget) setApiLogOpen(false);}}><div className="lyra-modal lyra-log-modal"><h2>Nhật ký API WebSocket</h2><p>Chỉ hiển thị loại sự kiện, trạng thái và thời gian, không hiển thị mật khẩu hoặc nội dung tin nhắn.</p><div className="lyra-log-list">{apiLogs.length ? [...apiLogs].reverse().map((entry, index) => <div key={index}><time>{entry.at}</time><strong>{entry.direction}</strong><span>{entry.event}</span><small>{entry.status}</small></div>) : <p>Chưa có sự kiện mới kể từ khi mở ứng dụng.</p>}</div><div className="lyra-modal-actions"><button type="button" onClick={() => setApiLogs([])}>Xóa nhật ký</button><button type="button" onClick={() => setApiLogOpen(false)}>Đóng</button></div></div></div>}
@@ -434,8 +482,8 @@ function AppRoutes() {
     return (
         <Routes>
             <Route path="/" element={
-                <Navigate to={isAuthenticated ? "/chat" : "/login"} replace/>
-            }
+                                 <Navigate to={isAuthenticated ? "/chat" : "/login"} replace/>
+                            }
             />
 
             <Route path="/login" element={isAuthenticated ? (
@@ -446,19 +494,19 @@ function AppRoutes() {
             />
 
             <Route path="/register" element={
-                isAuthenticated ? (
-                    <Navigate to="/chat" replace />
-                ) : (
-                    <Register onBackToLogin={() => navigate("/login")}/>
-                )
-                }
+                                        isAuthenticated ? (
+                                            <Navigate to="/chat" replace />
+                                        ) : (
+                                            <Register onBackToLogin={() => navigate("/login")}/>
+                                        )
+                                    }
             />
 
             <Route path="/chat" element={<ProtectedChatRoute />}/>
 
             <Route path="*" element={
-                <Navigate to={isAuthenticated ? "/chat" : "/login"} replace/>
-            }/>
+                                 <Navigate to={isAuthenticated ? "/chat" : "/login"} replace/>
+                            }/>
         </Routes>
     );
 }

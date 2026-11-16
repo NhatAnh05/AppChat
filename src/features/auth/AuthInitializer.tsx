@@ -1,77 +1,24 @@
+import { useEffect, useState, type ReactNode } from 'react';
+import { useDispatch } from 'react-redux';
+import type { AppDispatch } from '../../store/store';
+import { restoreLoginSession } from '../../services/loginService.ts';
+import { clearCredentials, setCredentials } from './authSlice';
 
-import { useEffect, useState, type ReactNode } from "react";
-import { useDispatch } from "react-redux";
-
-import type { AppDispatch } from "../../store/store";
-import { authService } from "../../services/authService";
-import { websocketService } from "../../services/websocket";
-
-import {
-    setCredentials,
-    clearCredentials,
-} from "./authSlice";
-
-type AuthInitializerProps = {
-    children: ReactNode;
-};
-
-export function AuthInitializer({ children }: AuthInitializerProps) {
+export function AuthInitializer({children}: {children: ReactNode}) {
     const dispatch = useDispatch<AppDispatch>();
     const [initialized, setInitialized] = useState(false);
-
     useEffect(() => {
+        // Remove credentials persisted by the broken, earlier AppChat authSlice.
+        // Current sessions use sessionStorage and are never restored from localStorage.
+        try { localStorage.removeItem('reLoginCode'); localStorage.removeItem('userId'); } catch { /* blocked storage */ }
         let cancelled = false;
-
-        const restoreSession = async () => {
-            const userId = localStorage.getItem("userId");
-            const reLoginCode = localStorage.getItem("reLoginCode");
-
-            if (!userId || !reLoginCode) {
-                dispatch(clearCredentials());
-                setInitialized(true);
-                return;
-            }
-
-            try {
-                await websocketService.connect();
-
-                const response = await authService.reLogin(
-                    userId,
-                    reLoginCode
-                );
-
-                if (
-                    response.status === "success" &&
-                    response.data?.RE_LOGIN_CODE
-                ) {
-                    dispatch(
-                        setCredentials({
-                            userId,
-                            reLoginCode: response.data.RE_LOGIN_CODE,
-                        })
-                    );
-                } else {
-                    dispatch(clearCredentials());
-                }
-            } catch (error) {
-                console.error("Lỗi khôi phục phiên:", error);
-            } finally {
-                if (!cancelled) {
-                    setInitialized(true);
-                }
-            }
-        };
-
-        void restoreSession();
-
-        return () => {
-            cancelled = true;
-        };
+        void restoreLoginSession().then(session => {
+            if (cancelled) return;
+            if (session) dispatch(setCredentials({userId:session.username,reLoginCode:session.reLoginCode}));
+            else dispatch(clearCredentials());
+        }).catch(() => { if (!cancelled) dispatch(clearCredentials()); })
+            .finally(() => { if (!cancelled) setInitialized(true); });
+        return () => { cancelled = true; };
     }, [dispatch]);
-
-    if (!initialized) {
-        return <div>Đang khôi phục phiên đăng nhập...</div>;
-    }
-
-    return <>{children}</>;
+    return initialized ? <>{children}</> : <div>Đang khôi phục phiên đăng nhập...</div>;
 }

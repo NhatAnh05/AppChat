@@ -1,3 +1,4 @@
+import { ensureLoginConnection } from "./loginService.ts";
 import { websocketService, type WebSocketMessage } from "./websocket";
 
 type UserCheckResponse = {
@@ -37,6 +38,7 @@ function sendRequest<T>(event: string, data: unknown,): Promise<WebSocketMessage
 
 export const userService = {
     async checkUserExist(username: string): Promise<boolean> {
+        await ensureLoginConnection();
         const response = await sendRequest<UserCheckResponse>(
             "CHECK_USER_EXIST",
             { user: username },
@@ -46,6 +48,7 @@ export const userService = {
     },
 
     async checkUserOnline(username: string): Promise<boolean> {
+        await ensureLoginConnection();
         const response = await sendRequest<UserCheckResponse>(
             "CHECK_USER_ONLINE",
             { user: username },

@@ -1,6 +1,6 @@
 import type { ChatMessage } from "../types/chat";
 import { websocketService, type WebSocketMessage } from "./websocket";
-import { authService } from "./authService";
+import { ensureLoginConnection } from "./loginService.ts";
 import { encodeChatContent, decodeChatContent } from "./chatContentCodec";
 
 type ApiPeopleMessage = {
@@ -28,22 +28,7 @@ const RESPONSE_TIMEOUT_MS = 10_000;
 class SendConfirmationMissingError extends Error {}
 
 async function ensureAuthenticatedConnection(): Promise<void> {
-  const wasConnected = websocketService.getStatus() === "CONNECTED";
-  await websocketService.connect();
-  if (wasConnected) return;
-
-  const userId = localStorage.getItem("userId");
-  const reLoginCode = localStorage.getItem("reLoginCode");
-  if (!userId || !reLoginCode) {
-    throw new Error("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
-  }
-
-  const response = await authService.reLogin(userId, reLoginCode);
-  const nextCode = response.data?.RE_LOGIN_CODE;
-  if (response.status !== "success" || !nextCode) {
-    throw new Error(response.mes ?? "Không thể khôi phục phiên đăng nhập.");
-  }
-  localStorage.setItem("reLoginCode", nextCode);
+  await ensureLoginConnection();
 }
 
 function mapMessage(message: ApiPeopleMessage, chatId: string): ChatMessage {
@@ -68,12 +53,12 @@ function validateMessages(data: unknown): ApiPeopleMessage[] {
 
     const message = item as Partial<ApiPeopleMessage>;
     if (
-      (typeof message.id !== "string" && typeof message.id !== "number") ||
-      typeof message.name !== "string" ||
-      typeof message.to !== "string" ||
-      typeof message.mes !== "string" ||
-      typeof message.createAt !== "string" ||
-      typeof message.type !== "number"
+        (typeof message.id !== "string" && typeof message.id !== "number") ||
+        typeof message.name !== "string" ||
+        typeof message.to !== "string" ||
+        typeof message.mes !== "string" ||
+        typeof message.createAt !== "string" ||
+        typeof message.type !== "number"
     ) {
       throw new Error("Tin nhắn thiếu dữ liệu.");
     }
@@ -195,10 +180,10 @@ export const peopleChatService = {
   },
 
   async sendMessage(
-    sender: string,
-    recipient: string,
-    content: string,
-    knownMessageIds: string[] = [],
+      sender: string,
+      recipient: string,
+      content: string,
+      knownMessageIds: string[] = [],
   ): Promise<ChatMessage | null> {
     const trimmedContent = content.trim();
     const transportContent = encodeChatContent(trimmedContent);
@@ -228,13 +213,13 @@ export const peopleChatService = {
           const historyResponse = await requestHistory(recipient, 1);
           if (historyResponse.status === "error") continue;
           const recentHistory = validateMessages(historyResponse.data)
-            .slice(0, 50)
-            .map(message => mapMessage(message, recipient));
+              .slice(0, 50)
+              .map(message => mapMessage(message, recipient));
           const confirmedMessage = recentHistory.find(message =>
-            !knownIds.has(message.id) &&
-            message.senderId.toLowerCase() === sender.toLowerCase() &&
-            message.recipientId?.toLowerCase() === recipient.toLowerCase() &&
-            message.content === trimmedContent
+              !knownIds.has(message.id) &&
+              message.senderId.toLowerCase() === sender.toLowerCase() &&
+              message.recipientId?.toLowerCase() === recipient.toLowerCase() &&
+              message.content === trimmedContent
           );
           if (confirmedMessage) return confirmedMessage;
         }
