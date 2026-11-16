@@ -25,6 +25,8 @@ import {userService} from "./services/userService.ts";
 import { logoutCurrentSession } from "./services/logoutService.ts";
 import { clearContacts } from "./features/contacts/contactsSlice";
 import { subscribeConnectionState } from "./services/connectionHealth.ts";
+import { getChatUnread, getTotalUnread, markChatRead, readUnreadLedger, recordIncomingMessage,
+    reconcileUnreadMessages, saveUnreadLedger } from "./services/unreadNotifications.ts";
 
 function mapUserToContact(item: UserListItem, type: "friend" | "group"): ContactEntry {
     return {
@@ -70,6 +72,8 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         catch { return []; }
     });
     const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
+    const [contactsInitialized, setContactsInitialized] = useState(false);
+    const [unreadLedger, setUnreadLedger] = useState(() => readUnreadLedger(currentUserId));
     const [activeSection, setActiveSection] = useState("Tin nhắn");
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [searchingUser, setSearchingUser] = useState(false);
@@ -78,6 +82,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
 
     const friends = useSelector((state: RootState) => state.contacts.friends);
     const groups = useSelector((state: RootState) => state.contacts.groups);
+    const historyByChat = useSelector((state: RootState) => state.messages.historyByChat);
     useEffect(() => websocketService.onStatus(setConnectionStatus), []);
     useEffect(() => subscribeConnectionState(state => {
         if (state === 'signed-out') {
@@ -88,6 +93,31 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     useEffect(() => websocketService.onLog(entry => setApiLogs(current => [...current.slice(-199), entry])), []);
     useEffect(() => localStorage.setItem(`lyra-pins-${currentUserId}`, JSON.stringify(pinnedIds)), [pinnedIds, currentUserId]);
     const messages = useSelector((state: RootState) => state.messages.messages);
+    useEffect(() => saveUnreadLedger(currentUserId, unreadLedger), [currentUserId, unreadLedger]);
+    // Backend APIs 1–5 have no read-receipt endpoint. Track client-side unread state per account.
+    const loadedChatIds = useMemo(() => Object.entries(historyByChat)
+        .filter(([, history]) => history.loadedPages.includes(1) || Boolean(history.error))
+        .map(([chatId]) => chatId), [historyByChat]);
+    const baselineReady = contactsInitialized && friends.every(friend => loadedChatIds.some(
+        id => id.toLowerCase() === friend.id.toLowerCase()));
+    useEffect(() => {
+        const visible = document.visibilityState === 'visible' && document.hasFocus();
+        setUnreadLedger(previous => reconcileUnreadMessages(previous, messages, currentUserId,
+            loadedChatIds, baselineReady, selectedChat?.id ?? null, visible));
+    }, [messages, currentUserId, loadedChatIds, baselineReady, selectedChat?.id]);
+    useEffect(() => {
+        const markVisibleConversation = () => {
+            if (document.visibilityState === 'visible' && document.hasFocus() && selectedChat) {
+                setUnreadLedger(previous => markChatRead(previous, selectedChat.id));
+            }
+        };
+        window.addEventListener('focus', markVisibleConversation);
+        document.addEventListener('visibilitychange', markVisibleConversation);
+        return () => {
+            window.removeEventListener('focus', markVisibleConversation);
+            document.removeEventListener('visibilitychange', markVisibleConversation);
+        };
+    }, [selectedChat]);
 
     // Receive forwarded 1-1 messages; outgoing acknowledgements are handled by peopleChatService.
     useEffect(() => websocketService.on("SEND_CHAT", (message) => {
@@ -110,7 +140,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             (friend) => friend.id.trim().toLowerCase() === data.name.trim().toLowerCase(),
         )?.id ?? data.name;
 
-        dispatch(addMessage({
+        const incomingMessage = {
             id: String(data.id ?? crypto.randomUUID()),
             chatId,
             senderId: data.name,
@@ -121,8 +151,11 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             createdAt: data.createAt ?? new Date().toISOString(),
             orderAt: new Date().toISOString(),
             type: typeof data.type === "number" ? data.type : 0,
-        }));
-    }), [currentUserId, dispatch, friends]);
+        };
+        setUnreadLedger(previous => recordIncomingMessage(previous, incomingMessage, currentUserId,
+            selectedChat?.id ?? null, document.visibilityState === 'visible' && document.hasFocus()));
+        dispatch(addMessage(incomingMessage));
+    }), [currentUserId, dispatch, friends, selectedChat?.id]);
 
     // Socket sau RE_LOGIN là một socket mới: cập nhật danh bạ từ Backend khi kết nối hồi phục.
     useEffect(() => {
@@ -195,6 +228,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             console.error("Không thể cập nhật danh sách:", error);
         } finally {
             dispatch(setContactsLoading(false));
+            setContactsInitialized(true);
         }
     };
 
@@ -212,6 +246,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
 
                 return {
                     ...chat,
+                    unreadCount: getChatUnread(unreadLedger, chat.id),
                     lastMessage: latestMessage
                         ? `${latestMessage.senderId === currentUserId ? "Bạn: " : ""}${latestMessage.content}`
                         : "",
@@ -225,7 +260,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                     .toLocaleLowerCase()
                     .includes(query.trim().toLocaleLowerCase())
             );
-    }, [chats, messages, currentUserId, query]);
+    }, [chats, messages, currentUserId, query, unreadLedger]);
 
     const handleLogout = async () => {
         if (logoutBusy) return;
@@ -294,6 +329,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             } finally {
                 if (!cancelled) {
                     dispatch(setContactsLoading(false));
+                    setContactsInitialized(true);
                 }
             }
         };
@@ -409,7 +445,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
 
     return (
         <main className={`app-shell lyra-workspace ${theme === "dark" ? "theme-dark" : ""} ${activeSection === "Danh bạ" ? "contacts-view" : ""}`}>
-            <Sidebar activeSection={activeSection} onSectionChange={(section) => {setSettingsOpen(false);setActiveSection(section); if(section !== "Cài đặt")setSelectedChat(null);}} settingsOpen={settingsOpen}
+            <Sidebar unreadCount={getTotalUnread(unreadLedger)} activeSection={activeSection} onSectionChange={(section) => {setSettingsOpen(false);setActiveSection(section); if(section !== "Cài đặt")setSelectedChat(null);}} settingsOpen={settingsOpen}
                      onSettingsToggle={() => {setSettingsOpen(true);setActiveSection("Cài đặt");}} onLogout={handleLogout}/>
 
             {activeSection === "Cài đặt" ? <SettingsDialog theme={theme} onThemeChange={setTheme} onLogout={handleLogout} onClose={() => {setSettingsOpen(false);setActiveSection("Tin nhắn");}} /> : activeSection === "Danh bạ" ? <ContactDirectory
@@ -418,7 +454,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                 <ChatList
                     chats={activeSection === "Nhóm" ? filteredChats.filter(chat => chat.kind === "group") : activeSection === "Thư mục" ? filteredChats.filter(chat => pinnedIds.includes(chat.id)) : activeSection === "Cuộc gọi" ? [] : filteredChats}
                     selectedId={selectedChat?.id}
-                    onSelect={(chat) => { setSelectedChat(chat); if (activeSection !== "Tin nhắn") setActiveSection("Tin nhắn"); }}
+                    onSelect={(chat) => { setSelectedChat(chat); setUnreadLedger(previous => markChatRead(previous, chat.id)); if (activeSection !== "Tin nhắn") setActiveSection("Tin nhắn"); }}
                     query={query}
                     onQueryChange={setQuery}
                     onSearchUser={handleSearchUser}

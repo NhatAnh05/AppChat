@@ -142,3 +142,4 @@ test('GET_USER_LIST accepts valid array when teacher server omits status',async(
   assert.equal((await pending)[0].name,'bob');
   disconnectLoginSession();
 });
+
