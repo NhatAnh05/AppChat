@@ -12,9 +12,12 @@ import ChatWindow from "./components/ChatWindow";
 import {clearCredentials, setCredentials,} from "./features/auth/authSlice";
 import { AuthInitializer } from "./features/auth/AuthInitializer";
 import { contactService } from "./services/contactService";
+import { createRoom } from "./services/createRoomService.ts";
+import { joinRoom } from "./services/roomChatService.ts";
+import { mapRoomMessage, roomChatId } from "./services/roomChatProtocol.ts";
 import type { UserListItem } from "./services/contactService";
-import {setContactsError, setContactsLoading, setFriends, setGroups,} from "./features/contacts/contactsSlice";
-import { addMessage, fetchPeopleChatHistory, importLocalMessages, invalidateHistory } from "./features/messages/messagesSlice";
+import {setContactsError, setContactsLoading, setFriends, setGroups, addGroup, removeGroup} from "./features/contacts/contactsSlice";
+import { addMessage, fetchPeopleChatHistory, importLocalMessages, invalidateHistory, clearConversationMessages } from "./features/messages/messagesSlice";
 import { websocketService, type ApiLogEntry, type WebSocketState } from "./services/websocket";
 import type { AppDispatch, RootState } from "./store/store";
 import type { Chat } from "./types/chat";
@@ -41,7 +44,7 @@ function mapUserToContact(item: UserListItem, type: "friend" | "group"): Contact
 
 function mapContactToChat(contact: ContactEntry, kind: "people" | "group"): Chat {
     return {
-        id: contact.id,
+        id: kind === 'group' ? roomChatId(contact.id) : contact.id,
         name: contact.name,
         avatar: contact.initials,
         avatarColor: contact.color,
@@ -60,6 +63,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
 
     const [query, setQuery] = useState("");
     const [composeOpen, setComposeOpen] = useState(false);
+    const [composeMode, setComposeMode] = useState<"people" | "group" | "join">("people");
     const [composeValue, setComposeValue] = useState("");
     const [composeBusy, setComposeBusy] = useState(false);
     const [composeError, setComposeError] = useState("");
@@ -132,6 +136,18 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             type?: number | string | null;
         } | null;
         if (!data || typeof data.name !== "string" || typeof data.to !== "string" || typeof data.mes !== "string") return;
+        // Group broadcasts use to=room and type=1, not the recipient username.
+        if (Number(data.type) === 1 || data.type === 'room') {
+            if (data.name.trim().toLowerCase() === currentUserId.trim().toLowerCase()) return;
+            const group = groups.find(entry => entry.id.trim().toLowerCase() === data.to.trim().toLowerCase());
+            if (!group) return; // Do not invent membership from an unrelated broadcast.
+            const incoming = mapRoomMessage(data, group.id);
+            if (!incoming) return;
+            setUnreadLedger(previous => recordIncomingMessage(previous, incoming, currentUserId,
+                selectedChat?.id ?? null, document.visibilityState === 'visible' && document.hasFocus()));
+            dispatch(addMessage({...incoming, orderAt: new Date().toISOString()}));
+            return;
+        }
         // The sender already adds the matching SEND_CHAT acknowledgement when the request resolves.
         if (data.name.trim().toLowerCase() === currentUserId.trim().toLowerCase()) return;
         if (data.to.trim().toLowerCase() !== currentUserId.trim().toLowerCase()) return;
@@ -155,7 +171,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         setUnreadLedger(previous => recordIncomingMessage(previous, incomingMessage, currentUserId,
             selectedChat?.id ?? null, document.visibilityState === 'visible' && document.hasFocus()));
         dispatch(addMessage(incomingMessage));
-    }), [currentUserId, dispatch, friends, selectedChat?.id]);
+    }), [currentUserId, dispatch, friends, groups, selectedChat?.id]);
 
     // Socket sau RE_LOGIN là một socket mới: cập nhật danh bạ từ Backend khi kết nối hồi phục.
     useEffect(() => {
@@ -278,6 +294,13 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         }
     };
 
+    const openCompose = (mode: "people" | "group" | "join" = "people") => {
+        setComposeMode(mode);
+        setComposeValue("");
+        setComposeError("");
+        setComposeOpen(true);
+    };
+
     const handleComposeSubmit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         const value = composeValue.trim();
@@ -285,11 +308,21 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         setComposeBusy(true);
         setComposeError("");
         try {
-            await handleSearchUser(value);
+            if (composeMode === "group" || composeMode === "join") {
+                // The group is added only after CREATE_ROOM / JOIN_ROOM success from Backend.
+                const created = composeMode === "group" ? await createRoom(value) : await joinRoom(value);
+                const contact = mapUserToContact({name:created.name, type:1, actionTime:""}, "group");
+                dispatch(addGroup(contact));
+                setSelectedChat(mapContactToChat(contact, "group"));
+                setActiveSection("Nhóm");
+                setQuery("");
+            } else {
+                await handleSearchUser(value);
+            }
             setComposeOpen(false);
             setComposeValue("");
         } catch (error) {
-            setComposeError(error instanceof Error ? error.message : "Không thể bắt đầu trò chuyện.");
+            setComposeError(error instanceof Error ? error.message : "Không thể tạo cuộc trò chuyện.");
         } finally { setComposeBusy(false); }
     };
 
@@ -450,6 +483,8 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
 
             {activeSection === "Cài đặt" ? <SettingsDialog theme={theme} onThemeChange={setTheme} onLogout={handleLogout} onClose={() => {setSettingsOpen(false);setActiveSection("Tin nhắn");}} /> : activeSection === "Danh bạ" ? <ContactDirectory
                 onRefresh={() => { void refreshUserList(); }}
+                onCreateRoom={() => openCompose("group")}
+                onJoinRoom={() => openCompose("join")}
             /> : <>
                 <ChatList
                     chats={activeSection === "Nhóm" ? filteredChats.filter(chat => chat.kind === "group") : activeSection === "Thư mục" ? filteredChats.filter(chat => pinnedIds.includes(chat.id)) : activeSection === "Cuộc gọi" ? [] : filteredChats}
@@ -459,15 +494,16 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                     onQueryChange={setQuery}
                     onSearchUser={handleSearchUser}
                     searchingUser={searchingUser}
-                    onCompose={() => {setComposeValue("");setComposeError("");setComposeOpen(true);}}
+                    onCompose={() => openCompose(activeSection === "Nhóm" ? "group" : "people")}
                 />
                 <section className="conversation-panel" aria-label="Nội dung cuộc trò chuyện">
                     {activeSection === "Cuộc gọi" ? <div className="feature-placeholder"><i className="bi bi-telephone"/><h2>Cuộc gọi</h2><p>Máy chủ hiện chưa cung cấp API gọi thoại/video. Không thể thực hiện cuộc gọi thực.</p></div>
-                        : activeSection === "Nhóm" && !selectedChat ? <div className="feature-placeholder"><i className="bi bi-people"/><h2>Nhóm trò chuyện</h2><p>Các nhóm được lấy từ danh sách máy chủ. Gửi tin nhắn nhóm yêu cầu API nhóm riêng.</p></div>
+                        : activeSection === "Nhóm" && !selectedChat ? <div className="feature-placeholder"><i className="bi bi-people"/><h2>Nhóm trò chuyện</h2><p>Các nhóm được lấy từ máy chủ. Bạn có thể tạo hoặc tham gia nhóm có sẵn.</p><button type="button" className="lyra-create-group-action" onClick={() => openCompose("group")}>Tạo nhóm (API 6)</button> <button type="button" className="lyra-create-group-action" onClick={() => openCompose("join")}>Tham gia nhóm (JOIN_ROOM)</button></div>
                             : activeSection === "Thư mục" && !selectedChat ? <div className="feature-placeholder"><i className="bi bi-folder2-open"/><h2>Thư mục đã lưu</h2><p>Mở cuộc trò chuyện ở mục Tin nhắn và bấm “Lưu vào thư mục” để đánh dấu ngay trên trình duyệt này.</p></div>
                                 : <>
 
-                                    <ChatWindow chat={selectedChat} currentUserId={currentUserId} onMessageSent={refreshUserList}/>
+                                    <ChatWindow chat={selectedChat} currentUserId={currentUserId} onMessageSent={refreshUserList}
+                                                onRoomLeft={(roomName) => {dispatch(removeGroup(roomName));dispatch(clearConversationMessages(roomChatId(roomName)));setUnreadLedger(previous => markChatRead(previous, roomChatId(roomName)));setSelectedChat(null);void refreshUserList();}}/>
                                 </>}
                     <div className="lyra-status-dock">
                         <span className={`api-state ${connectionStatus === "CONNECTED" ? "connected" : ""}`}><i className="bi bi-wifi"/> {connectionStatus === "CONNECTED" ? "Đã kết nối API" : connectionStatus === "CONNECTING" ? "Đang kết nối" : "Mất kết nối API"}</span>
@@ -480,11 +516,16 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             </>}
             {composeOpen && <div className="lyra-modal-backdrop" onMouseDown={(e) => {if (e.target === e.currentTarget && !composeBusy) setComposeOpen(false);}}>
                 <form className="lyra-modal" onSubmit={event => {void handleComposeSubmit(event);}}>
-                    <h2>Tạo cuộc trò chuyện</h2>
-                    <p>Nhập username đã tồn tại trên máy chủ để bắt đầu trò chuyện cá nhân.</p>
-                    <input autoFocus value={composeValue} onChange={event => setComposeValue(event.target.value)} placeholder="Username" required/>
+                    <h2>{composeMode === "group" ? "Tạo nhóm mới (API 6)" : composeMode === "join" ? "Tham gia nhóm (JOIN_ROOM)" : "Tạo cuộc trò chuyện"}</h2>
+                    <div className="lyra-compose-tabs" role="group" aria-label="Loại cuộc trò chuyện">
+                        <button type="button" className={composeMode === "people" ? "is-active" : ""} aria-pressed={composeMode === "people"} disabled={composeBusy} onClick={() => { setComposeMode("people"); setComposeValue(""); setComposeError(""); }}>Cá nhân</button>
+                        <button type="button" className={composeMode === "group" ? "is-active" : ""} aria-pressed={composeMode === "group"} disabled={composeBusy} onClick={() => { setComposeMode("group"); setComposeValue(""); setComposeError(""); }}>Tạo nhóm</button>
+                        <button type="button" className={composeMode === "join" ? "is-active" : ""} aria-pressed={composeMode === "join"} disabled={composeBusy} onClick={() => { setComposeMode("join"); setComposeValue(""); setComposeError(""); }}>Tham gia nhóm</button>
+                    </div>
+                    <p>{composeMode === "group" ? "Tạo nhóm và chờ CREATE_ROOM thành công. Người tạo là chủ phòng." : composeMode === "join" ? "Nhập tên nhóm đã có, chỉ tham gia khi Backend xác nhận JOIN_ROOM." : "Nhập username đã tồn tại trên máy chủ để bắt đầu trò chuyện cá nhân."}</p>
+                    <input autoFocus aria-label={composeMode !== "people" ? "Tên nhóm" : "Username"} value={composeValue} onChange={event => setComposeValue(event.target.value)} placeholder={composeMode !== "people" ? "Ví dụ: Nhóm học tập" : "Username"} maxLength={composeMode !== "people" ? 80 : undefined} required disabled={composeBusy}/>
                     {composeError && <p role="alert" className="login-error">{composeError}</p>}
-                    <div className="lyra-modal-actions"><button type="button" disabled={composeBusy} onClick={() => setComposeOpen(false)}>Hủy</button><button type="submit" disabled={composeBusy}>{composeBusy ? "Đang xử lý..." : "Bắt đầu trò chuyện"}</button></div>
+                    <div className="lyra-modal-actions"><button type="button" disabled={composeBusy} onClick={() => setComposeOpen(false)}>Hủy</button><button type="submit" disabled={composeBusy || !composeValue.trim()}>{composeBusy ? "Đang chờ máy chủ..." : composeMode === "group" ? "Tạo nhóm" : composeMode === "join" ? "Tham gia" : "Bắt đầu trò chuyện"}</button></div>
                 </form>
             </div>}
             {apiLogOpen && <div className="lyra-modal-backdrop" onMouseDown={e => {if (e.target === e.currentTarget) setApiLogOpen(false);}}><div className="lyra-modal lyra-log-modal"><h2>Nhật ký API WebSocket</h2><p>Chỉ hiển thị loại sự kiện, trạng thái và thời gian, không hiển thị mật khẩu hoặc nội dung tin nhắn.</p><div className="lyra-log-list">{apiLogs.length ? [...apiLogs].reverse().map((entry, index) => <div key={index}><time>{entry.at}</time><strong>{entry.direction}</strong><span>{entry.event}</span><small>{entry.status}</small></div>) : <p>Chưa có sự kiện mới kể từ khi mở ứng dụng.</p>}</div><div className="lyra-modal-actions"><button type="button" onClick={() => setApiLogs([])}>Xóa nhật ký</button><button type="button" onClick={() => setApiLogOpen(false)}>Đóng</button></div></div></div>}

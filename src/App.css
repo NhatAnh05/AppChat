@@ -423,3 +423,12 @@
     font-size: 9px;
   }
 }
+
+/* API 6 CREATE_ROOM: small mode selector inside the existing compose dialog. */
+.lyra-compose-tabs {display:flex;gap:7px;margin:5px 0 14px;}
+.lyra-compose-tabs button {flex:1;padding:10px;border-radius:9px;border:1px solid #cadbd3;background:#f7faf9;color:#37665b;font-weight:600;cursor:pointer;}
+.lyra-compose-tabs button.is-active {background:#245d4e;border-color:#245d4e;color:#fff;}
+.lyra-compose-tabs button:disabled {opacity:.6;cursor:wait;}
+.lyra-create-group-action {margin-top:15px;border:0;background:#245d4e;color:white;padding:10px 16px;border-radius:9px;cursor:pointer;font-weight:600;}
+.lyra-create-group-action:hover {background:#184c40;}
+.theme-dark .lyra-compose-tabs button:not(.is-active) {background:#213b35;border-color:#415f55;color:#d9e9e2;}
