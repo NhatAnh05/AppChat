@@ -18,7 +18,7 @@ type ApiSentPeopleMessage = {
   to?: string;
   mes?: string;
   createAt?: string;
-  type?: number;
+  type?: number | string;
 };
 
 let historyRequestQueue: Promise<void> = Promise.resolve();
@@ -121,6 +121,8 @@ function requestSendMessage(recipient: string, content: string): Promise<WebSock
 
     unsubscribeMessage = websocketService.on("SEND_CHAT", (message) => {
       const data = message.data as Partial<ApiSentPeopleMessage> | null;
+      // Group SEND_CHAT broadcasts share the event name; never accept them as 1:1 receipts.
+      if (data?.type === 1 || data?.type === 'room') return;
       if (data?.to && data.to.toLowerCase() !== recipient.toLowerCase()) return;
       if (data?.mes && data.mes !== content) return;
 
@@ -223,7 +225,7 @@ export const peopleChatService = {
           );
           if (confirmedMessage) return confirmedMessage;
         }
-        throw new Error("Máy chủ chưa xác nhận hoặc chưa lưu tin nhắn chứa emoji. Chữ thường gửi được nhưng nội dung mã hóa chưa được server phản hồi. Hãy mở Nhật ký API để kiểm tra SEND_CHAT và GET_PEOPLE_CHAT_MES; không gửi lại liên tục để tránh trùng tin.");
+        throw new Error("Máy chủ chưa xác nhận hoặc chưa lưu tin nhắn chứa emoji. Chữ thường gửi được nhưng nội dung mã hóa chưa được server phản hồi. Hãy mở Nhật ký API để kiểm tra SEND_CHAT và GET_PEOPLE_CHAT_MES; không gửi lại liên tục để tránh trùng tin.", { cause: error });
       } catch (historyError) {
         throw historyError instanceof Error ? historyError : new Error("Không xác minh được trạng thái gửi tin.");
       }
@@ -249,7 +251,7 @@ export const peopleChatService = {
       content: decodeChatContent(responseData.mes ?? transportContent),
       createdAt: responseData.createAt ?? new Date().toISOString(),
       orderAt,
-      type: responseData.type ?? 0,
+      type: typeof responseData.type === "number" ? responseData.type : 0,
     };
   },
 };

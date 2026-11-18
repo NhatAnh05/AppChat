@@ -1,12 +1,9 @@
 import type { ChatMessage } from '../types/chat';
 
-/** Client-side read state for API 1–5. The teacher server has no read-receipt endpoint. */
 export type UnreadLedger = {
   version: 1;
   initialized: boolean;
-  /** Conversation IDs whose initial server history has been observed. */
   initializedChats: string[];
-  /** Only hashes/IDs are saved; message content is never stored here. */
   known: string[];
   unread: Record<string, string[]>;
 };
@@ -43,8 +40,8 @@ export function readUnreadLedger(account: string, storage?: Pick<Storage, 'getIt
     if (!parsed || typeof parsed !== 'object') return emptyUnreadLedger();
     const state = parsed as Partial<UnreadLedger>;
     if (state.version !== 1 || typeof state.initialized !== 'boolean' ||
-      !Array.isArray(state.known) || !Array.isArray(state.initializedChats) ||
-      !state.unread || typeof state.unread !== 'object' || Array.isArray(state.unread)) return emptyUnreadLedger();
+        !Array.isArray(state.known) || !Array.isArray(state.initializedChats) ||
+        !state.unread || typeof state.unread !== 'object' || Array.isArray(state.unread)) return emptyUnreadLedger();
     const known = state.known.filter((entry): entry is string => typeof entry === 'string').slice(-MAX_KNOWN);
     const initializedChats = state.initializedChats.filter((entry): entry is string => typeof entry === 'string').map(normalize);
     const unread: Record<string, string[]> = {};
@@ -68,6 +65,13 @@ export function getChatUnread(ledger: UnreadLedger, chatId: string): number {
 export function getTotalUnread(ledger: UnreadLedger): number {
   return Object.values(ledger.unread).reduce((total, keys) => total + keys.length, 0);
 }
+
+export function getTotalUnreadForChats(ledger: UnreadLedger, chatIds: readonly string[]): number {
+  const uniqueChats = new Set(chatIds.map(normalize).filter(Boolean));
+  let total = 0;
+  for (const id of uniqueChats) total += getChatUnread(ledger, id);
+  return total;
+}
 export function markChatRead(ledger: UnreadLedger, chatId: string): UnreadLedger {
   const id = normalize(chatId);
   if (!ledger.unread[id]?.length) return ledger;
@@ -76,9 +80,8 @@ export function markChatRead(ledger: UnreadLedger, chatId: string): UnreadLedger
   return {...ledger, unread};
 }
 
-/** A real-time incoming frame can precede the first history fetch. Do not discard it. */
 export function recordIncomingMessage(ledger: UnreadLedger, message: ChatMessage, account: string,
-  activeChatId: string | null, isVisible: boolean): UnreadLedger {
+                                      activeChatId: string | null, isVisible: boolean): UnreadLedger {
   if (normalize(message.senderId) === normalize(account)) return ledger;
   const keys = messageKeys(message);
   const known = new Set(ledger.known);
@@ -91,13 +94,9 @@ export function recordIncomingMessage(ledger: UnreadLedger, message: ChatMessage
   return {...ledger, known: [...known].slice(-MAX_KNOWN), unread};
 }
 
-/**
- * Apply Redux history changes without counting old messages as newly received.
- * Newly loaded conversations are baselined; only later new incoming messages raise badges.
- */
 export function reconcileUnreadMessages(ledger: UnreadLedger, messages: readonly ChatMessage[], account: string,
-  loadedChatIds: readonly string[], baselineReady: boolean,
-  activeChatId: string | null, isVisible: boolean): UnreadLedger {
+                                        loadedChatIds: readonly string[], baselineReady: boolean,
+                                        activeChatId: string | null, isVisible: boolean): UnreadLedger {
   if (!ledger.initialized && !baselineReady) return ledger;
   const previousChats = new Set(ledger.initializedChats);
   const allChats = new Set([...ledger.initializedChats, ...loadedChatIds.map(normalize)]);
@@ -107,7 +106,6 @@ export function reconcileUnreadMessages(ledger: UnreadLedger, messages: readonly
   for (const message of messages) {
     const keys = messageKeys(message);
     if (keys.some(key => known.has(key))) {
-      // Backfill aliases when a server ACK changes the message identifier.
       for (const key of keys) if (!known.has(key)) {known.add(key); changed = true;}
       continue;
     }
@@ -115,7 +113,6 @@ export function reconcileUnreadMessages(ledger: UnreadLedger, messages: readonly
     changed = true;
     const chat = normalize(message.chatId);
     if (normalize(message.senderId) === normalize(account)) continue;
-    // First fetch of a chat is the baseline, not a stream of new notifications.
     if (!ledger.initialized || !previousChats.has(chat)) continue;
     if (isVisible && chat === normalize(activeChatId ?? '')) continue;
     unread[chat] = [...(unread[chat] ?? []), keys[0]].slice(-MAX_PER_CHAT);

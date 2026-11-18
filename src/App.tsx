@@ -28,7 +28,7 @@ import {userService} from "./services/userService.ts";
 import { logoutCurrentSession } from "./services/logoutService.ts";
 import { clearContacts } from "./features/contacts/contactsSlice";
 import { subscribeConnectionState } from "./services/connectionHealth.ts";
-import { getChatUnread, getTotalUnread, markChatRead, readUnreadLedger, recordIncomingMessage,
+import { getChatUnread, getTotalUnreadForChats, markChatRead, readUnreadLedger, recordIncomingMessage,
     reconcileUnreadMessages, saveUnreadLedger } from "./services/unreadNotifications.ts";
 
 function mapUserToContact(item: UserListItem, type: "friend" | "group"): ContactEntry {
@@ -115,6 +115,9 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                 setUnreadLedger(previous => markChatRead(previous, selectedChat.id));
             }
         };
+        // Also mark the chat as read when it is opened directly (search/join/restore),
+        // rather than waiting for a new focus or visibilitychange event.
+        markVisibleConversation();
         window.addEventListener('focus', markVisibleConversation);
         document.addEventListener('visibilitychange', markVisibleConversation);
         return () => {
@@ -152,9 +155,19 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         if (data.name.trim().toLowerCase() === currentUserId.trim().toLowerCase()) return;
         if (data.to.trim().toLowerCase() !== currentUserId.trim().toLowerCase()) return;
 
+        if (!data.name.trim()) return;
         const chatId = friends.find(
             (friend) => friend.id.trim().toLowerCase() === data.name.trim().toLowerCase(),
         )?.id ?? data.name;
+
+        // A sender absent from GET_USER_LIST must still be shown in the chat list.
+        // Otherwise unread messages can accumulate with no conversation to open.
+        const currentFriends = store.getState().contacts.friends;
+        if (!currentFriends.some(friend => friend.id.trim().toLowerCase() === chatId.trim().toLowerCase())) {
+            dispatch(setFriends([...currentFriends, mapUserToContact(
+                { name: data.name, type: 0, actionTime: '' }, 'friend',
+            )]));
+        }
 
         const incomingMessage = {
             id: String(data.id ?? crypto.randomUUID()),
@@ -171,7 +184,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         setUnreadLedger(previous => recordIncomingMessage(previous, incomingMessage, currentUserId,
             selectedChat?.id ?? null, document.visibilityState === 'visible' && document.hasFocus()));
         dispatch(addMessage(incomingMessage));
-    }), [currentUserId, dispatch, friends, groups, selectedChat?.id]);
+    }), [currentUserId, dispatch, friends, groups, selectedChat?.id, store]);
 
     // Socket sau RE_LOGIN là một socket mới: cập nhật danh bạ từ Backend khi kết nối hồi phục.
     useEffect(() => {
@@ -313,7 +326,9 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                 const created = composeMode === "group" ? await createRoom(value) : await joinRoom(value);
                 const contact = mapUserToContact({name:created.name, type:1, actionTime:""}, "group");
                 dispatch(addGroup(contact));
-                setSelectedChat(mapContactToChat(contact, "group"));
+                const roomChat = mapContactToChat(contact, "group");
+                setSelectedChat(roomChat);
+                setUnreadLedger(previous => markChatRead(previous, roomChat.id));
                 setActiveSection("Nhóm");
                 setQuery("");
             } else {
@@ -346,7 +361,16 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                     .filter(item => item.type === 1)
                     .map(item => mapUserToContact(item, "group"));
 
-                dispatch(setFriends(friends));
+                // Keep contacts discovered through incoming WebSocket frames while
+                // GET_USER_LIST is in flight, so their unread badges remain reachable.
+                const latestFriends = store.getState().contacts.friends;
+                const mergedFriends = [...friends];
+                latestFriends.forEach(friend => {
+                    if (!mergedFriends.some(item => item.id.toLowerCase() === friend.id.toLowerCase())) {
+                        mergedFriends.push(friend);
+                    }
+                });
+                dispatch(setFriends(mergedFriends));
                 dispatch(setGroups(groups));
 
             } catch (error) {
@@ -372,7 +396,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         return () => {
             cancelled = true;
         };
-    }, [dispatch]);
+    }, [dispatch, store]);
 
     const handleSearchUser = async (username: string) => {
         const user = username.trim();
@@ -431,8 +455,9 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                 dispatch(setFriends([...friends, newContact]));
             }
 
-            // Mở cuộc trò chuyện.
+            // Mở cuộc trò chuyện và xóa badge ngay, kể cả khi chọn từ tìm kiếm.
             setSelectedChat(chat);
+            setUnreadLedger(previous => markChatRead(previous, chat.id));
             setActiveSection("Tin nhắn");
             setQuery("");
 
@@ -478,7 +503,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
 
     return (
         <main className={`app-shell lyra-workspace ${theme === "dark" ? "theme-dark" : ""} ${activeSection === "Danh bạ" ? "contacts-view" : ""}`}>
-            <Sidebar unreadCount={getTotalUnread(unreadLedger)} activeSection={activeSection} onSectionChange={(section) => {setSettingsOpen(false);setActiveSection(section); if(section !== "Cài đặt")setSelectedChat(null);}} settingsOpen={settingsOpen}
+            <Sidebar unreadCount={getTotalUnreadForChats(unreadLedger, chats.map(chat => chat.id))} activeSection={activeSection} onSectionChange={(section) => {setSettingsOpen(false);setActiveSection(section); if(section !== "Cài đặt")setSelectedChat(null);}} settingsOpen={settingsOpen}
                      onSettingsToggle={() => {setSettingsOpen(true);setActiveSection("Cài đặt");}} onLogout={handleLogout}/>
 
             {activeSection === "Cài đặt" ? <SettingsDialog theme={theme} onThemeChange={setTheme} onLogout={handleLogout} onClose={() => {setSettingsOpen(false);setActiveSection("Tin nhắn");}} /> : activeSection === "Danh bạ" ? <ContactDirectory
@@ -534,15 +559,10 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
 }
 
 function ProtectedChatRoute() {
-    const { isAuthenticated, userId } = useSelector(
-        (state: RootState) => state.auth
-    );
+    const { isAuthenticated, userId } = useSelector((state: RootState) => state.auth);
 
     return isAuthenticated && userId ? (
-        <ChatWorkspace currentUserId={userId} />
-    ) : (
-        <Navigate to="/login" replace />
-    );
+        <ChatWorkspace currentUserId={userId} />) : (<Navigate to="/login" replace />);
 }
 
 function AppRoutes() {
@@ -558,32 +578,16 @@ function AppRoutes() {
 
     return (
         <Routes>
-            <Route path="/" element={
-                                 <Navigate to={isAuthenticated ? "/chat" : "/login"} replace/>
-                            }
-            />
+            <Route path="/" element={<Navigate to={isAuthenticated ? "/chat" : "/login"} replace/>} />
 
-            <Route path="/login" element={isAuthenticated ? (
-                <Navigate to="/chat" replace />
-            ) : (
-                <Login onLogin={handleLogin} onRegister={() => navigate("/register")}/>
-            )}
-            />
+            <Route path="/login" element={isAuthenticated ? (<Navigate to="/chat" replace />) : (<Login onLogin={handleLogin} onRegister={() => navigate("/register")}/>)}/>
 
-            <Route path="/register" element={
-                                        isAuthenticated ? (
-                                            <Navigate to="/chat" replace />
-                                        ) : (
-                                            <Register onBackToLogin={() => navigate("/login")}/>
-                                        )
-                                    }
-            />
+            <Route path="/register" element={isAuthenticated ? (<Navigate to="/chat" replace />) : (<Register onBackToLogin={() => navigate("/login")}/>)}/>
 
             <Route path="/chat" element={<ProtectedChatRoute />}/>
 
-            <Route path="*" element={
-                                 <Navigate to={isAuthenticated ? "/chat" : "/login"} replace/>
-                            }/>
+            <Route path="*" element={<Navigate to={isAuthenticated ? "/chat" : "/login"} replace/>}/>
+
         </Routes>
     );
 }

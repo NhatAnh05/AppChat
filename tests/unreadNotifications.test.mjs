@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emptyUnreadLedger, getChatUnread, getTotalUnread, markChatRead,
+import { emptyUnreadLedger, getChatUnread, getTotalUnread, getTotalUnreadForChats, markChatRead,
   readUnreadLedger, recordIncomingMessage, reconcileUnreadMessages, saveUnreadLedger,
 } from '../src/services/unreadNotifications.ts';
 
@@ -11,7 +11,7 @@ const sent = (id, chatId = 'Alice') => ({
   id, chatId, senderId: 'Me', recipientId:chatId, content: 'Tôi đã trả lời', createdAt:'2026-11-16T09:01:00Z',
 });
 const baseline = (messages = [], chats=['Alice']) => reconcileUnreadMessages(
-  emptyUnreadLedger(), messages, 'Me', chats, true, null, true,
+    emptyUnreadLedger(), messages, 'Me', chats, true, null, true,
 );
 
 test('Initial historical messages do not create unread notifications', () => {
@@ -87,4 +87,26 @@ test('Bad or unavailable localStorage does not crash the app', () => {
   const broken = {getItem() {throw new Error('blocked')},setItem() {throw new Error('blocked')}};
   assert.equal(getTotalUnread(readUnreadLedger('Me', broken)), 0);
   assert.doesNotThrow(() => saveUnreadLedger('Me', emptyUnreadLedger(), broken));
+});
+
+
+test('Sidebar total excludes orphaned chat keys, while preserving unread for accessible chats', () => {
+  let ledger = baseline([], ['Alice']);
+  ledger = recordIncomingMessage(ledger, incoming('ghost1', 'Removed'), 'Me', null, false);
+  ledger = recordIncomingMessage(ledger, incoming('ghost2', 'Removed', '2', '2026-11-16T10:00:00Z'), 'Me', null, false);
+  ledger = recordIncomingMessage(ledger, incoming('ghost3', 'Removed', '3', '2026-11-16T11:00:00Z'), 'Me', null, false);
+  assert.equal(getTotalUnread(ledger), 3);
+  assert.equal(getTotalUnreadForChats(ledger, ['Alice']), 0);
+  assert.equal(getTotalUnreadForChats(ledger, ['Removed', 'Alice']), 3);
+  assert.equal(getTotalUnreadForChats(ledger, ['Removed', 'removed', 'Alice']), 3);
+  assert.equal(getTotalUnreadForChats(markChatRead(ledger, 'Removed'), ['Removed']), 0);
+});
+
+test('Sidebar unread total covers group IDs with room: prefix and does not count duplicates', () => {
+  let ledger = baseline([]);
+  ledger = recordIncomingMessage(ledger, incoming('g1', 'room:Study'), 'Me', null, false);
+  ledger = recordIncomingMessage(ledger, incoming('p1', 'Alice'), 'Me', null, false);
+  assert.equal(getTotalUnreadForChats(ledger, ['Alice', 'room:Study']), 2);
+  assert.equal(getTotalUnreadForChats(ledger, ['room:Study', 'ROOM:STUDY']), 1);
+  assert.equal(getTotalUnreadForChats(markChatRead(ledger, 'room:Study'), ['room:Study']), 0);
 });
