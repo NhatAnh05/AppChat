@@ -26,3 +26,25 @@ test('SEND_CHAT room waits for matching group broadcast',async()=>{const s=await
 test('SEND_CHAT denied when user not a group member',async()=>{const s=await login();const p=sendRoomMessage('ABC','msg');await tick();s.receive({event:'SEND_CHAT',status:'error',mes:'You are not in this room!'});await assert.rejects(p,/not in this room/);disconnectLoginSession()});
 test('Timeout cannot fake group success',async()=>{const s=await login();const p=getRoomHistory('ABC',1,{timeoutMs:3});await assert.rejects(p,/chưa xác nhận/);assert.equal(s.readyState,1);disconnectLoginSession()});
 test('Logout connection closes pending operation',async()=>{const s=await login();const p=joinRoom('ABC');await tick();s.close();await assert.rejects(p,/Mất kết nối/);disconnectLoginSession()});
+
+test('OUT_ROOM ignores a confirmation for a different named room', async () => {
+ const socket = await login();
+ const pending = leaveRoom('Room A');
+ await tick();
+ let settled = false;
+ void pending.then(() => { settled = true; });
+ socket.receive({ event: 'OUT_ROOM', status: 'success', data: { name: 'Room B', mes: 'You left the room successfully!' } });
+ await tick();
+ assert.equal(settled, false);
+ socket.receive({ event: 'OUT_ROOM', status: 'success', data: { name: 'Room A', mes: 'You left the room successfully!' } });
+ await pending;
+ disconnectLoginSession();
+});
+
+test('OUT_ROOM rejects invalid room name locally without sending a packet', async () => {
+ const socket = await login();
+ const count = socket.sent.length;
+ await assert.rejects(leaveRoom('   '), /tên nhóm/);
+ assert.equal(socket.sent.length, count);
+ disconnectLoginSession();
+});

@@ -12,6 +12,7 @@ type ChatListProps = {
   onSearchUser: (username: string) => void;
   searchingUser: boolean;
   onCompose: () => void;
+  groupMode?: boolean;
 };
 
 type SearchResult = {
@@ -20,7 +21,7 @@ type SearchResult = {
   error: string;
 };
 
-export function ChatList({chats, selectedId, onSelect, query, onQueryChange, onSearchUser, searchingUser, onCompose,}: ChatListProps) {
+export function ChatList({chats, selectedId, onSelect, query, onQueryChange, onSearchUser, searchingUser, onCompose, groupMode = false}: ChatListProps) {
   const [filter, setFilter] = useState<"all" | "people" | "group">("all");
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [checkingKeyword, setCheckingKeyword] = useState("");
@@ -29,8 +30,8 @@ export function ChatList({chats, selectedId, onSelect, query, onQueryChange, onS
   // Các cuộc trò chuyện hiện có
   const filteredChats = useMemo(() =>
           chats.filter((chat) =>
-              (filter === "all" || (chat.kind ?? "people") === filter) && chat.name.toLowerCase().includes(keyword.toLowerCase())
-          ), [chats, keyword, filter]
+              (groupMode ? chat.kind === 'group' : (filter === "all" || (chat.kind ?? "people") === filter)) && chat.name.toLowerCase().includes(keyword.toLowerCase())
+          ), [chats, keyword, filter, groupMode]
   );
 
   // Kiểm tra username có tồn tại trong danh sách chat hay chưa.
@@ -47,7 +48,7 @@ export function ChatList({chats, selectedId, onSelect, query, onQueryChange, onS
 
   // Tìm kiếm tài khoản sau khi người dùng ngừng gõ 500ms.
   useEffect(() => {
-    if (!keyword || existingChat) {
+    if (groupMode || !keyword || existingChat) {
       return;
     }
 
@@ -85,7 +86,7 @@ export function ChatList({chats, selectedId, onSelect, query, onQueryChange, onS
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [keyword, existingChat]);
+  }, [keyword, existingChat, groupMode]);
 
   // Tạo Chat cho tài khoản tìm thấy.
   const foundUserChat: Chat | null = foundUser ? {
@@ -112,10 +113,10 @@ export function ChatList({chats, selectedId, onSelect, query, onQueryChange, onS
         <header className="chat-list-header">
           <div className="list-title-row">
             <div>
-              <h1>Tin nhắn</h1>
+              <h1>{groupMode ? 'Nhóm trò chuyện' : 'Tin nhắn'}</h1>
             </div>
 
-            <button className="compose-button" aria-label="Tạo tin nhắn mới" onClick={onCompose}>
+            <button className="compose-button" aria-label={groupMode ? 'Tạo nhóm mới' : 'Tạo tin nhắn mới'} onClick={onCompose}>
               <i className="bi bi-chat-square-text"/>
             </button>
           </div>
@@ -131,8 +132,8 @@ export function ChatList({chats, selectedId, onSelect, query, onQueryChange, onS
                 onChange={(event) =>
                     onQueryChange(event.target.value)
                 }
-                placeholder="Tìm kiếm cuộc trò chuyện"
-                aria-label="Tìm cuộc trò chuyện hoặc username"
+                placeholder={groupMode ? 'Tìm nhóm đã tham gia' : 'Tìm kiếm cuộc trò chuyện'}
+                aria-label={groupMode ? 'Tìm nhóm đã tham gia' : 'Tìm cuộc trò chuyện hoặc username'}
             />
 
             {query && (
@@ -142,11 +143,11 @@ export function ChatList({chats, selectedId, onSelect, query, onQueryChange, onS
             )}
           </label>
 
-          <div className="chat-filters" role="group" aria-label="Lọc cuộc trò chuyện">
+          {!groupMode && <div className="chat-filters" role="group" aria-label="Lọc cuộc trò chuyện">
             <button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>Tất cả</button>
             <button className={filter === "people" ? "active" : ""} onClick={() => setFilter("people")}>Cá nhân</button>
             <button className={filter === "group" ? "active" : ""} onClick={() => setFilter("group")}>Nhóm</button>
-          </div>
+          </div>}
         </header>
 
         <div className="chat-items">
@@ -159,7 +160,7 @@ export function ChatList({chats, selectedId, onSelect, query, onQueryChange, onS
               />
           ))}
 
-          {foundUserChat && (
+          {!groupMode && foundUserChat && (
               <div className="search-result">
                 <div className="search-result-label">
                   Kết quả tìm kiếm
@@ -174,7 +175,7 @@ export function ChatList({chats, selectedId, onSelect, query, onQueryChange, onS
               </div>
           )}
 
-          {keyword && !existingChat && !foundUserChat && filteredChats.length === 0 && (
+          {!groupMode && keyword && !existingChat && !foundUserChat && filteredChats.length === 0 && (
                   <div className="list-empty">
                     <strong>
                       {searchingUser || checkingKeyword === keyword ? "Đang tìm người dùng..." : searchError || "Đang tìm kiếm..."}
@@ -182,9 +183,10 @@ export function ChatList({chats, selectedId, onSelect, query, onQueryChange, onS
                   </div>
               )}
 
+          {groupMode && keyword && filteredChats.length === 0 && <div className="list-empty">Không tìm thấy nhóm.</div>}
           {!keyword && filteredChats.length === 0 && (
               <div className="list-empty">
-                <strong>Chưa có cuộc trò chuyện</strong>
+                <strong>{groupMode ? 'Chưa tham gia nhóm nào' : 'Chưa có cuộc trò chuyện'}</strong>
               </div>
           )}
         </div>

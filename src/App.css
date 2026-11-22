@@ -459,3 +459,340 @@
 .theme-dark .lyra-replied-preview,.theme-dark .lyra-reply-composer { background:#18372f;color:#bfe4d3; }
 .theme-dark .lyra-react-picker,.theme-dark .lyra-message-reactions button,.theme-dark .lyra-message-actions button { background:#1e293b;color:#e5e7eb;border-color:#475569; }
 @media(hover:none) { .lyra-message-actions {opacity:1;} }
+
+/* --------------------------------------------------------------------------
+   Quản lý nhóm – CREATE_ROOM / JOIN_ROOM / OUT_ROOM
+   Khu vực thao tác dùng chung bảng màu xanh của LyraChat; không giả lập kết quả API.
+   -------------------------------------------------------------------------- */
+.lyra-group-dashboard {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: clamp(16px, 2.8vw, 34px);
+  background: #f6faf8;
+  color: #193d39;
+}
+
+.lyra-groups-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 25px;
+}
+
+.lyra-groups-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 9px;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .08em;
+  color: #27755e;
+}
+
+.lyra-groups-heading h1 {
+  margin: 0;
+  font-size: clamp(20px, 2.1vw, 26px);
+  font-weight: 750;
+  line-height: 1.3;
+}
+
+.lyra-groups-heading p,
+.lyra-groups-list-header p {
+  margin: 9px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #728d85;
+}
+
+.lyra-group-count {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-radius: 20px;
+  border: 1px solid #c9e3d9;
+  background: #e8f5ef;
+  color: #225b4a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.lyra-groups-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 30px;
+}
+
+.lyra-group-feature-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: 10px;
+  padding: 21px;
+  border-radius: 15px;
+  border: 1px solid #b9dfd2;
+  color: #214e43;
+  background: linear-gradient(145deg, #e9f7f1 0%, #fff 90%);
+  cursor: pointer;
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+
+.lyra-group-feature-card.join {
+  color: #274d6d;
+  border-color: #c9ddec;
+  background: linear-gradient(145deg, #e9f3fb 0%, #fff 90%);
+}
+
+.lyra-group-feature-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px #164d3a12;
+  border-color: #4b9d83;
+}
+
+.lyra-group-feature-card:focus-visible,
+.lyra-group-card button:focus-visible,
+.lyra-groups-toolbar button:focus-visible,
+.lyra-groups-refresh:focus-visible {
+  outline: 3px solid #4dbaa4;
+  outline-offset: 3px;
+}
+
+.lyra-group-feature-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  background: #cee9df;
+  font-size: 20px;
+}
+
+.lyra-group-feature-card.join .lyra-group-feature-icon { background: #d6e8f4; }
+.lyra-group-feature-card strong { font-size: 16px; }
+.lyra-group-feature-card > span:nth-of-type(2) { font-size: 12px; line-height: 1.6; color: #718a87; }
+.lyra-group-feature-cta { font-size: 12px; font-weight: 750; margin-top: 4px; }
+
+.lyra-groups-list-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.lyra-groups-list-header h2 { margin: 0; font-size: 17px; color: inherit; }
+.lyra-groups-list-header p { margin-top: 4px; }
+
+.lyra-groups-refresh,
+.lyra-groups-sort {
+  border: 1px solid #d1e3db;
+  background: #fff;
+  color: #2c6250;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-weight: 650;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.lyra-groups-refresh:disabled { opacity: .6; cursor: wait; }
+.lyra-groups-refresh i { margin-right: 5px; }
+
+.lyra-groups-toolbar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 15px;
+}
+
+.lyra-groups-search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #d7e4dd;
+  background: #fff;
+  border-radius: 10px;
+  padding: 0 13px;
+  color: #8da29a;
+}
+
+.lyra-groups-search:focus-within { border-color: #49a383; box-shadow: 0 0 0 3px #49a38318; }
+.lyra-groups-search input { width: 100%; min-width: 0; height: 39px; border: 0; outline: 0; background: transparent; font-size: 12px; color: #264e45; }
+.lyra-groups-search button { border: 0; background: none; font-size: 19px; cursor: pointer; color: #8da29a; }
+
+.lyra-groups-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+  gap: 14px;
+  align-items: stretch;
+}
+
+.lyra-group-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 16px;
+  padding: 17px;
+  background: #fff;
+  border: 1px solid #e0ece6;
+  border-radius: 13px;
+  box-shadow: 0 5px 18px #193e2808;
+}
+
+.lyra-group-card-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.lyra-group-card-main > div { min-width: 0; }
+.lyra-group-avatar {
+  display: grid;
+  flex: 0 0 45px;
+  place-items: center;
+  height: 45px;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #327d69, #56a68a);
+  color: white;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.lyra-group-card h3 { margin: 0 0 7px; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lyra-group-card p { margin: 0; font-size: 11px; color: #789388; }
+.lyra-group-card p i { margin-right: 3px; }
+.lyra-group-card-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.lyra-group-card-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 33px;
+  padding: 7px 10px;
+  border: 1px solid #d7e4de;
+  border-radius: 8px;
+  background: #f8fcfa;
+  color: #356a56;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.lyra-group-card-actions .primary { background: #265e4b; color: white; border-color: #265e4b; }
+.lyra-group-card-actions .danger { color: #ae4848; background: #fff7f7; border-color: #f1d9d9; }
+.lyra-group-card-actions button:hover { filter: brightness(.96); }
+
+.lyra-groups-empty {
+  display: flex;
+  min-height: 200px;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  border: 1px dashed #c8ded2;
+  border-radius: 13px;
+  background: #fff;
+  padding: 25px;
+}
+
+.lyra-groups-empty > i { font-size: 31px; color: #5b9c84; }
+.lyra-groups-empty strong { font-size: 14px; color: #284e40; }
+.lyra-groups-empty p { max-width: 310px; margin: 0; font-size: 12px; line-height: 1.6; color: #81958c; }
+.lyra-groups-empty button { background: #285f4d; border: 0; color: #fff; border-radius: 8px; padding: 9px 12px; cursor: pointer; font-weight: 650; }
+
+.lyra-groups-alert,
+.lyra-group-notification {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #eed3c4;
+  border-radius: 9px;
+  background: #fff7f1;
+  color: #9a5740;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.lyra-groups-alert.success,
+.lyra-group-notification { background: #e9f7ed; color: #246849; border-color: #cce8d4; }
+.lyra-group-notification { flex: 0 0 auto; margin: 0; border-radius: 0; }
+.lyra-group-notification button { margin-left: auto; border: 0; background: none; color: inherit; cursor: pointer; font-size: 18px; }
+.lyra-group-confirm { max-width: 450px; }
+.lyra-group-confirm-icon { display: grid; place-items: center; width: 45px; height: 45px; border-radius: 12px; background: #fff0eb; color: #b45447; font-size: 21px; margin-bottom: 14px; }
+.lyra-group-confirm .lyra-confirm-leave-button { background: #b84c4c; border-color: #b84c4c; color: #fff; }
+.lyra-group-confirm button:disabled { opacity: .55; cursor: wait; }
+
+/* Thành viên nhóm, tình trạng tải và xác nhận rời nhóm trong cửa sổ chat */
+.lyra-group-detail-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.lyra-group-detail-heading h3 { margin: 0; }
+.lyra-group-detail-heading button { border: 0; background: none; color: #327b60; cursor: pointer; font-size: 11px; }
+.lyra-group-member-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 15px; max-height: 175px; overflow-y: auto; }
+.lyra-group-member { display: flex; align-items: center; gap: 9px; padding: 6px; border-radius: 7px; background: #f4f9f6; font-size: 12px; }
+.lyra-group-member-avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: #d3ebe1; color: #276b51; font-size: 10px; }
+.lyra-group-leave-trigger { width: 100%; border: 1px solid #edcdcd; color: #ad4545; background: #fff4f4; padding: 10px; border-radius: 8px; cursor: pointer; font-weight: 650; }
+.lyra-group-leave-confirm { margin-top: 12px; padding: 13px; border: 1px solid #f0cece; border-radius: 9px; background: #fff8f8; color: #8f3e3e; }
+.lyra-group-leave-confirm strong { font-size: 13px; }
+.lyra-group-leave-confirm p { font-size: 11px; line-height: 1.5; }
+.lyra-group-leave-confirm > div { display: flex; gap: 7px; justify-content: flex-end; }
+.lyra-group-leave-confirm button { padding: 8px 10px; border-radius: 7px; border: 1px solid #ead2d2; background: #fff; color: #904646; cursor: pointer; font-size: 11px; }
+.lyra-group-leave-confirm button:last-child { background: #b64a4a; border-color: #b64a4a; color: #fff; }
+.lyra-group-leave-confirm button:disabled { opacity: .6; cursor: wait; }
+
+/* Chế độ tối và bố cục các màn hình nhỏ */
+.lyra-workspace.theme-dark .lyra-group-dashboard { background: #142421; color: #e7f5ef; }
+.lyra-workspace.theme-dark .lyra-groups-heading p,
+.lyra-workspace.theme-dark .lyra-groups-list-header p { color: #b5c9c1; }
+.lyra-workspace.theme-dark .lyra-group-card,
+.lyra-workspace.theme-dark .lyra-groups-empty,
+.lyra-workspace.theme-dark .lyra-groups-refresh,
+.lyra-workspace.theme-dark .lyra-groups-sort,
+.lyra-workspace.theme-dark .lyra-groups-search { background: #213731; color: #e8f4ef; border-color: #34554a; }
+.lyra-workspace.theme-dark .lyra-group-feature-card { background: #224438; color: #e9f7f0; border-color: #416b59; }
+.lyra-workspace.theme-dark .lyra-group-feature-card.join { background: #243d4a; border-color: #435f6e; }
+.lyra-workspace.theme-dark .lyra-group-feature-card > span:nth-of-type(2) { color: #c2d4cd; }
+.lyra-workspace.theme-dark .lyra-groups-search input { color: #f1fff8; }
+.lyra-workspace.theme-dark .lyra-group-card h3,
+.lyra-workspace.theme-dark .lyra-groups-empty strong { color: #edf9f2; }
+.lyra-workspace.theme-dark .lyra-group-member { background: #203c33; }
+
+@media (max-width: 1130px) {
+  .lyra-groups-action-grid { gap: 10px; }
+  .lyra-group-feature-card { padding: 15px; }
+  .lyra-group-feature-card strong { font-size: 14px; }
+  .lyra-groups-heading p { max-width: 390px; }
+}
+
+@media (max-width: 760px) {
+  .lyra-groups-action-grid { grid-template-columns: 1fr; }
+  .lyra-groups-heading { flex-direction: column; }
+  .lyra-groups-heading h1 { font-size: 19px; }
+  .lyra-groups-toolbar { flex-direction: column; }
+  .lyra-groups-sort { align-self: flex-end; }
+}
+
+@media (max-width: 620px) {
+  .lyra-group-dashboard { min-height: 0; padding: 14px; }
+  .lyra-groups-grid { grid-template-columns: minmax(0, 1fr); }
+  .lyra-groups-heading { margin-bottom: 16px; }
+  .lyra-group-feature-card { gap: 6px; }
+}
+
+.directory-group-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 8px 11px;
+  background: #e9f6f0;
+  color: #24634f;
+  border: 1px solid #cee5d8;
+  border-radius: 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.directory-group-open:hover { background: #d8eee3; }

@@ -18,6 +18,7 @@ function serialize<T>(event:string,action:()=>Promise<T>):Promise<T>{
 async function request<T>(event:string,payload:object,interpret:(frame:WebSocketMessage)=>T|null,options:Options={}):Promise<T>{
   if(options.signal?.aborted)throw new Error('Đã hủy thao tác.');
   await ensureLoginConnection();
+  if(options.signal?.aborted)throw new Error('Đã hủy thao tác.');
   const socket=websocketService.getSocket();
   if(!socket||!websocketService.isAuthenticated())throw new Error('Cần đăng nhập trước khi thao tác nhóm.');
   return new Promise<T>((resolve,reject)=>{
@@ -51,6 +52,11 @@ export async function joinRoom(rawName:string,options:Options={}):Promise<RoomDe
 export async function leaveRoom(rawName:string,options:Options={}):Promise<void>{
   const name=normalizeRoomName(rawName);
   return serialize('OUT_ROOM',()=>request('OUT_ROOM',{name},frame=>{
+    // Một số phản hồi có tên phòng, một số chỉ có data.mes.
+    // Nếu server có tên phòng, bỏ qua phản hồi của phòng khác.
+    const receivedName = frame.data && typeof frame.data === 'object' && 'name' in frame.data
+      ? (frame.data as {name?:unknown}).name : undefined;
+    if (typeof receivedName === 'string' && receivedName.toLowerCase() !== name.toLowerCase()) return null;
     const result=parseLeaveRoomResponse(frame);if(!result)return null;
     if(result.status==='error')throw new Error(result.message);
     return true;

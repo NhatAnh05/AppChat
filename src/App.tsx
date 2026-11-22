@@ -3,6 +3,7 @@ import {useEffect, useMemo, useState, type FormEvent} from "react";
 import {useDispatch, useSelector, useStore} from "react-redux";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { ChatList } from "./components/ChatList";
+import { GroupDashboard } from "./components/GroupDashboard";
 import { ContactDirectory } from "./components/ContactDirectory";
 import { Sidebar } from "./components/Sidebar";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -13,8 +14,9 @@ import {clearCredentials, setCredentials,} from "./features/auth/authSlice";
 import { AuthInitializer } from "./features/auth/AuthInitializer";
 import { contactService } from "./services/contactService";
 import { createRoom } from "./services/createRoomService.ts";
-import { joinRoom } from "./services/roomChatService.ts";
+import { joinRoom, leaveRoom } from "./services/roomChatService.ts";
 import { mapRoomMessage, roomChatId } from "./services/roomChatProtocol.ts";
+import { makeGroupContact, readableGroupError, sameGroupName } from "./services/groupManagement.ts";
 import type { UserListItem } from "./services/contactService";
 import {setContactsError, setContactsLoading, setFriends, setGroups, addGroup, removeGroup} from "./features/contacts/contactsSlice";
 import { addMessage, fetchPeopleChatHistory, importLocalMessages, invalidateHistory, clearConversationMessages } from "./features/messages/messagesSlice";
@@ -67,6 +69,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const [composeValue, setComposeValue] = useState("");
     const [composeBusy, setComposeBusy] = useState(false);
     const [composeError, setComposeError] = useState("");
+    const [groupNotice, setGroupNotice] = useState("");
     const [logoutBusy, setLogoutBusy] = useState(false);
     const [apiLogOpen, setApiLogOpen] = useState(false);
     const [apiLogs, setApiLogs] = useState<ApiLogEntry[]>([]);
@@ -88,6 +91,8 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
 
     const friends = useSelector((state: RootState) => state.contacts.friends);
     const groups = useSelector((state: RootState) => state.contacts.groups);
+    const contactsLoading = useSelector((state: RootState) => state.contacts.loading);
+    const contactsError = useSelector((state: RootState) => state.contacts.error);
     const historyByChat = useSelector((state: RootState) => state.messages.historyByChat);
     useEffect(() => websocketService.onStatus(setConnectionStatus), []);
     useEffect(() => {
@@ -395,6 +400,29 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         }
     };
 
+    // Xóa dữ liệu nhóm trên giao diện CHỈ sau khi OUT_ROOM được máy chủ xác nhận.
+    const onGroupLeft = (roomName: string) => {
+        dispatch(removeGroup(roomName));
+        dispatch(clearConversationMessages(roomChatId(roomName)));
+        setUnreadLedger(previous => markChatRead(previous, roomChatId(roomName)));
+        setSelectedChat(previous => previous?.kind === 'group' && sameGroupName(previous.name, roomName) ? null : previous);
+        setGroupNotice(`Bạn đã rời nhóm “${roomName}”.`);
+        void refreshUserList();
+    };
+
+    const leaveGroupFromDashboard = async (roomName: string) => {
+        await leaveRoom(roomName);
+        onGroupLeft(roomName);
+    };
+
+    const openGroup = (group: ContactEntry) => {
+        const chat = mapContactToChat(group, 'group');
+        setSelectedChat(chat);
+        setUnreadLedger(previous => markChatRead(previous, chat.id));
+        setQuery('');
+        setActiveSection('Nhóm');
+    };
+
     const openCompose = (mode: "people" | "group" | "join" = "people") => {
         setComposeMode(mode);
         setComposeValue("");
@@ -412,20 +440,19 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             if (composeMode === "group" || composeMode === "join") {
                 // The group is added only after CREATE_ROOM / JOIN_ROOM success from Backend.
                 const created = composeMode === "group" ? await createRoom(value) : await joinRoom(value);
-                const contact = mapUserToContact({name:created.name, type:1, actionTime:""}, "group");
+                const contact = makeGroupContact(created);
                 dispatch(addGroup(contact));
-                const roomChat = mapContactToChat(contact, "group");
-                setSelectedChat(roomChat);
-                setUnreadLedger(previous => markChatRead(previous, roomChat.id));
-                setActiveSection("Nhóm");
-                setQuery("");
+                openGroup(contact);
+                setGroupNotice(composeMode === 'group'
+                    ? `Đã tạo nhóm “${created.name}” và được máy chủ xác nhận.`
+                    : `Đã tham gia nhóm “${created.name}” thành công.`);
             } else {
                 await handleSearchUser(value);
             }
             setComposeOpen(false);
             setComposeValue("");
         } catch (error) {
-            setComposeError(error instanceof Error ? error.message : "Không thể tạo cuộc trò chuyện.");
+            setComposeError(readableGroupError(error));
         } finally { setComposeBusy(false); }
     };
 
@@ -609,28 +636,43 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                 onRefresh={() => { void refreshUserList(); }}
                 onCreateRoom={() => openCompose("group")}
                 onJoinRoom={() => openCompose("join")}
+                onOpenGroup={openGroup}
             /> : <>
                 <ChatList
                     chats={activeSection === "Nhóm" ? filteredChats.filter(chat => chat.kind === "group") : activeSection === "Thư mục" ? filteredChats.filter(chat => pinnedIds.includes(chat.id)) : activeSection === "Cuộc gọi" ? [] : filteredChats}
                     selectedId={selectedChat?.id}
-                    onSelect={(chat) => { setSelectedChat(chat); setUnreadLedger(previous => markChatRead(previous, chat.id)); if (activeSection !== "Tin nhắn") setActiveSection("Tin nhắn"); }}
+                    onSelect={(chat) => { setSelectedChat(chat); setUnreadLedger(previous => markChatRead(previous, chat.id)); if (activeSection !== 'Nhóm' && activeSection !== 'Tin nhắn') setActiveSection('Tin nhắn'); }}
                     query={query}
                     onQueryChange={setQuery}
                     onSearchUser={handleSearchUser}
                     searchingUser={searchingUser}
+                    groupMode={activeSection === 'Nhóm'}
                     onCompose={() => openCompose(activeSection === "Nhóm" ? "group" : "people")}
                 />
                 <section className="conversation-panel" aria-label="Nội dung cuộc trò chuyện">
                     {activeSection === "Cuộc gọi" ? <div className="feature-placeholder"><i className="bi bi-telephone"/><h2>Cuộc gọi</h2><p>Máy chủ hiện chưa cung cấp API gọi thoại/video. Không thể thực hiện cuộc gọi thực.</p></div>
-                        : activeSection === "Nhóm" && !selectedChat ? <div className="feature-placeholder"><i className="bi bi-people"/><h2>Nhóm trò chuyện</h2><p>Các nhóm được lấy từ máy chủ. Bạn có thể tạo hoặc tham gia nhóm có sẵn.</p><button type="button" className="lyra-create-group-action" onClick={() => openCompose("group")}>Tạo nhóm (API 6)</button> <button type="button" className="lyra-create-group-action" onClick={() => openCompose("join")}>Tham gia nhóm (JOIN_ROOM)</button></div>
+                        : activeSection === "Nhóm" && !selectedChat ? <GroupDashboard
+                            groups={groups}
+                            loading={contactsLoading}
+                            error={contactsError}
+                            onCreate={() => openCompose('group')}
+                            onJoin={() => openCompose('join')}
+                            onOpen={openGroup}
+                            onRefresh={() => { void refreshUserList(); }}
+                            onLeave={leaveGroupFromDashboard}
+                        />
                             : activeSection === "Thư mục" && !selectedChat ? <div className="feature-placeholder"><i className="bi bi-folder2-open"/><h2>Thư mục đã lưu</h2><p>Mở cuộc trò chuyện ở mục Tin nhắn và bấm “Lưu vào thư mục” để đánh dấu ngay trên trình duyệt này.</p></div>
                                 : <>
 
                                     <ChatWindow chat={currentChat} currentUserId={currentUserId} onMessageSent={refreshUserList}
                                                 presenceError={presenceError} presenceChecking={presenceChecking}
                                                 onCheckPresence={checkSelectedPresence}
-                                                onRoomLeft={(roomName) => {dispatch(removeGroup(roomName));dispatch(clearConversationMessages(roomChatId(roomName)));setUnreadLedger(previous => markChatRead(previous, roomChatId(roomName)));setSelectedChat(null);void refreshUserList();}}/>
+                                                onRoomLeft={onGroupLeft}/>
                                 </>}
+                    {groupNotice && activeSection === 'Nhóm' && <div className="lyra-group-notification" role="status">
+                        <i className="bi bi-check-circle" /> {groupNotice}
+                        <button type="button" aria-label="Đóng thông báo nhóm" onClick={() => setGroupNotice('')}>×</button>
+                    </div>}
                     <div className="lyra-status-dock">
                         <span className={`api-state ${connectionStatus === "CONNECTED" ? "connected" : ""}`}><i className="bi bi-wifi"/> {connectionStatus === "CONNECTED" ? "Đã kết nối API" : connectionStatus === "CONNECTING" ? "Đang kết nối" : "Mất kết nối API"}</span>
                         <button onClick={() => void refreshChats()}><i className="bi bi-arrow-repeat"/> Làm mới hội thoại</button>
