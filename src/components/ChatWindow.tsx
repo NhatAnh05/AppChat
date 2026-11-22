@@ -5,6 +5,7 @@ import type { AppDispatch } from '../store/store'
 import MessageList from './MessageList'
 import MessageInput from './MessageInput'
 import type { Chat } from '../types/chat'
+import type { ReplyReference } from '../services/messageInteractions'
 import { getRoomHistory, leaveRoom } from '../services/roomChatService.ts'
 import type { CreatedRoomMember } from '../services/createRoomProtocol.ts'
 
@@ -24,7 +25,10 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
     const [members, setMembers] = useState<CreatedRoomMember[]>([])
     const [roomError, setRoomError] = useState('')
     const [leaveBusy, setLeaveBusy] = useState(false)
+    const [replyTo, setReplyTo] = useState<ReplyReference | null>(null)
     const [callMode, setCallMode] = useState<"voice" | "video" | null>(null)
+
+    useEffect(() => { setReplyTo(null) }, [chat?.id])
 
     useEffect(() => {
         if (!chat) return
@@ -126,12 +130,15 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
                 currentUserId={currentUserId}
                 username={chat.name}
                 isPeopleChat={chat.kind === 'people'}
+                onReply={setReplyTo}
             />
 
             <MessageInput
                 chatId={chat.id}
                 currentUserId={currentUserId}
                 isGroup={chat.kind === 'group'}
+                replyTo={replyTo}
+                onCancelReply={() => setReplyTo(null)}
                 onMessageSent={onMessageSent}
             />
         </main>

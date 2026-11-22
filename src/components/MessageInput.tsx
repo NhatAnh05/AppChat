@@ -6,6 +6,7 @@ import { sendRoomMessage } from "../services/roomChatService.ts";
 import { roomNameFromChatId } from "../services/roomChatProtocol.ts";
 import { uploadMedia } from "../services/mediaUpload";
 import { encodeMediaMessage, type LyraMediaKind } from "../services/mediaMessage";
+import { makeReply, type ReplyReference } from "../services/messageInteractions";
 import type { AppDispatch, RootState } from "../store/store";
 
 type MessageInputProps = {
@@ -13,9 +14,11 @@ type MessageInputProps = {
   currentUserId: string;
   onMessageSent?: () => void;
   isGroup?: boolean;
+  replyTo?: ReplyReference | null;
+  onCancelReply?: () => void;
 };
 
-export default function MessageInput({ chatId, currentUserId, onMessageSent, isGroup = false }: MessageInputProps) {
+export default function MessageInput({ chatId, currentUserId, onMessageSent, isGroup = false, replyTo, onCancelReply }: MessageInputProps) {
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
   const sendingGroupRef = useRef(false);
@@ -89,6 +92,7 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
         const confirmed = await sendRoomMessage(roomNameFromChatId(chatId), trimmedContent);
         dispatch(addMessage({...confirmed, orderAt:new Date().toISOString()}));
         onMessageSent?.();
+        if (clearInput) onCancelReply?.();
       } catch (error) {
         if (clearInput) setContent(previous => previous || trimmedContent);
         throw error;
@@ -109,6 +113,7 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
       if (!confirmed) throw new Error("Máy chủ chưa xác nhận tin nhắn. Không thể coi đây là gửi thành công.");
       dispatch(replaceMessage({ id: optimisticId, message: { ...confirmed, orderAt: sentAt } }));
       onMessageSent?.();
+      if (clearInput) onCancelReply?.();
     } catch (error) {
       dispatch(removeMessage({ chatId, id: optimisticId }));
       if (clearInput) setContent(previous => previous || trimmedContent);
@@ -118,7 +123,7 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    try { await sendContent(content, true); }
+    try { await sendContent(replyTo ? makeReply(content, replyTo) : content, true); }
     catch (error) { alert(error instanceof Error ? error.message : "Không gửi được tin nhắn."); }
   };
 
@@ -144,7 +149,12 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
   };
 
   return (
-      <form className="message-input-container" onSubmit={handleSubmit}>
+      <form className={`message-input-container ${replyTo ? "has-reply" : ""}`} onSubmit={handleSubmit}>
+        {replyTo && <div className="lyra-reply-composer" aria-label="Đang trả lời tin nhắn">
+          <i className="bi bi-reply" aria-hidden="true" />
+          <div><strong>Trả lời {replyTo.sender}</strong><span>{replyTo.excerpt}</span></div>
+          <button type="button" title="Hủy trả lời" aria-label="Hủy trả lời" onClick={onCancelReply}><i className="bi bi-x-lg" /></button>
+        </div>}
         <input ref={fileInputRef} type="file" hidden onChange={e => void handleMediaFile(e.target.files?.[0])} />
         <div className="media-attach-anchor" ref={mediaMenuRef}>
           <button
