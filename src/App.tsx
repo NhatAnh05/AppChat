@@ -236,14 +236,14 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             } catch (error) {
                 // A timeout or invalid response means unknown, not offline.
                 // Log which user failed so API troubleshooting is possible.
-                console.warn('[LyraChat] Không xác minh được trạng thái:', id, error);
+                if (!userService.isOnlineCheckUnsupported()) console.warn('[LyraChat] Không xác minh được trạng thái:', id, error);
                 if (!cancelled && id.toLowerCase() === activeId?.toLowerCase()) {
                     setPresenceError(error instanceof Error ? error.message : 'Kiểm tra trạng thái thất bại.');
                 }
             }
         };
         const checkPresence = async () => {
-            if (cancelled || running || !websocketService.isAuthenticated() ||
+            if (cancelled || running || userService.isOnlineCheckUnsupported() || !websocketService.isAuthenticated() ||
                 !navigator.onLine || document.visibilityState !== 'visible') return;
             running = true;
             try {

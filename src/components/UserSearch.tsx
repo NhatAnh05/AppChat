@@ -3,7 +3,7 @@ import { userService } from "../services/userService";
 
 type SearchResult = {
     username: string;
-    online: boolean;
+    online: boolean | undefined;
 };
 
 type UserSearchProps = {
@@ -49,7 +49,9 @@ export function UserSearch({onOpenChat, currentUser,}: UserSearchProps) {
                 return;
             }
 
-            const online = await userService.checkUserOnline(user);
+            let online: boolean | undefined;
+            try { online = await userService.checkUserOnline(user); }
+            catch { online = undefined; }
 
             setResult({
                 username: user,
@@ -94,7 +96,7 @@ export function UserSearch({onOpenChat, currentUser,}: UserSearchProps) {
                         <strong>{result.username}</strong>
 
                         <span>
-                            {result.online ? "Đang online" : "Ngoại tuyến"}
+                            {result.online === true ? "Đang hoạt động" : result.online === false ? "Ngoại tuyến" : "Chưa xác định trạng thái"}
                         </span>
                     </div>
 
