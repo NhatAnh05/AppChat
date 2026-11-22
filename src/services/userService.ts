@@ -49,7 +49,7 @@ function sendCheck(requestEvent: string, responseEvent: string, username: string
                     finish(new Error('Mất kết nối khi kiểm tra trạng thái người dùng.'));
                 }
             }));
-            const timer = setTimeout(() => finish(new Error(`Máy chủ không phản hồi ${responseEvent}.`)), 6500);
+            const timer = setTimeout(() => finish(new Error(`Máy chủ không phản hồi ${responseEvent}.`)), 4000);
             cleanups.push(() => clearTimeout(timer));
             try { websocketService.send(requestEvent, { user: username }); }
             catch (error) { finish(error instanceof Error ? error : new Error('Không gửi được yêu cầu.')); }

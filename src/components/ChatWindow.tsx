@@ -13,9 +13,12 @@ type ChatWindowProps = {
     currentUserId: string
     onMessageSent?: () => void
     onRoomLeft?: (name:string) => void
+    onCheckPresence?: (username: string) => Promise<boolean | undefined>
+    presenceError?: string | null
+    presenceChecking?: boolean
 }
 
-export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLeft}: ChatWindowProps) {
+export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLeft, onCheckPresence, presenceError, presenceChecking}: ChatWindowProps) {
     const dispatch = useDispatch<AppDispatch>()
     const [detailOpen, setDetailOpen] = useState(false)
     const [members, setMembers] = useState<CreatedRoomMember[]>([])
@@ -80,11 +83,11 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
 
                 <div className="chat-header-info">
                     <h2>{chat.name}</h2>
-                    <span>
-                            {chat.kind === 'group' ? 'Nhóm trò chuyện' : chat.online === true ? 'Đang hoạt động' : chat.online === false ? 'Ngoại tuyến' : 'Chưa rõ trạng thái'}
-                        </span>
+                    <span>{chat.kind === 'group' ? 'Nhóm trò chuyện' : chat.online === true ? 'Đang hoạt động' : chat.online === false ? 'Ngoại tuyến' : 'Chưa rõ trạng thái'}</span>
+                    {chat.kind === 'people' && presenceError && <small role="status" title={presenceError} style={{color:'#b45309',fontSize:'11px'}}>Không kiểm tra được: {presenceError}</small>}
                 </div>
                 <div className="chat-header-actions">
+                    {chat.kind === 'people' && <button type="button" aria-label="Kiểm tra trạng thái hoạt động" title="Kiểm tra online ngay và xem lỗi nếu API không phản hồi" disabled={presenceChecking} onClick={() => void onCheckPresence?.(chat.id)}><i className={`bi bi-${presenceChecking ? 'hourglass-split' : 'arrow-clockwise'}`} /></button>}
                     <button type="button" title="Gọi thoại" aria-label="Gọi thoại" onClick={() => setCallMode("voice")}><i className="bi bi-telephone" /></button>
                     <button type="button" title="Gọi video" aria-label="Gọi video" onClick={() => setCallMode("video")}><i className="bi bi-camera-video" /></button>
                     <button type="button" className="chat-profile-btn" onClick={() => { void openDetails(); }}><i className="bi bi-person-circle" /> <span>{chat.kind === "group" ? "Thông tin nhóm" : "Xem trang cá nhân"}</span></button>

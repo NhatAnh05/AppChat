@@ -77,6 +77,8 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     });
     const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
     const [contactsInitialized, setContactsInitialized] = useState(false);
+    const [presenceError, setPresenceError] = useState<string | null>(null);
+    const [presenceChecking, setPresenceChecking] = useState(false);
     const [unreadLedger, setUnreadLedger] = useState(() => readUnreadLedger(currentUserId));
     const [activeSection, setActiveSection] = useState("Tin nhắn");
     const [settingsOpen, setSettingsOpen] = useState(false);
@@ -196,41 +198,75 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [connectionStatus]);
 
-    // Presence: API 15 does not broadcast online/offline changes, so poll the
-    // teacher's CHECK_USER_ONLINE endpoint for known people on a fixed cadence.
-    // The API has no correlation IDs: userService serializes requests.
+    // Explicit check allows a user to verify the teacher server's real response.
+    // No simulated/guessed Online state when the server does not answer.
+    const checkSelectedPresence = async (username: string) => {
+        setPresenceError(null);
+        setPresenceChecking(true);
+        try {
+            const online = await userService.checkUserOnline(username);
+            dispatch(setContactOnline({ id: username, online }));
+            return online;
+        } catch (error) {
+            const reason = error instanceof Error ? error.message : 'Không xác định được phản hồi từ máy chủ.';
+            setPresenceError(reason);
+            console.warn('[LyraChat] Kiểm tra trạng thái thất bại:', username, reason);
+            return undefined;
+        } finally {
+            setPresenceChecking(false);
+        }
+    };
+
+    // The active conversation takes precedence over background presence checks.
+    // API 15 has no request ID and checks are serialized in userService.
+    // Do not queue checks for 20 people (20 * timeout) ahead of the active chat.
     useEffect(() => {
         let cancelled = false;
         let running = false;
         let cursor = 0;
+        const activeId = selectedChat?.kind === 'people' ? selectedChat.id : null;
+        setPresenceError(null);
+        const updateOne = async (id: string) => {
+            try {
+                const online = await userService.checkUserOnline(id);
+                if (!cancelled && websocketService.isAuthenticated()) {
+                    dispatch(setContactOnline({ id, online }));
+                    if (id.toLowerCase() === activeId?.toLowerCase()) setPresenceError(null);
+                }
+            } catch (error) {
+                // A timeout or invalid response means unknown, not offline.
+                // Log which user failed so API troubleshooting is possible.
+                console.warn('[LyraChat] Không xác minh được trạng thái:', id, error);
+                if (!cancelled && id.toLowerCase() === activeId?.toLowerCase()) {
+                    setPresenceError(error instanceof Error ? error.message : 'Kiểm tra trạng thái thất bại.');
+                }
+            }
+        };
         const checkPresence = async () => {
             if (cancelled || running || !websocketService.isAuthenticated() ||
                 !navigator.onLine || document.visibilityState !== 'visible') return;
             running = true;
             try {
-                const entries = store.getState().contacts.friends
-                    .filter(friend => friend.id.toLowerCase() !== currentUserId.toLowerCase());
-                // Limit each cycle to 20 people to avoid overwhelming the server.
-                const count = Math.min(20, entries.length);
-                for (let index = 0; index < count && !cancelled; index++) {
-                    if (!websocketService.isAuthenticated() || document.visibilityState !== 'visible') break;
-                    const friend = entries[(cursor + index) % entries.length];
-                    try {
-                        const online = await userService.checkUserOnline(friend.id);
-                        if (!cancelled && websocketService.isAuthenticated()) {
-                            dispatch(setContactOnline({ id: friend.id, online }));
-                        }
-                    } catch {
-                        // Unknown status is not equivalent to offline.
-                        // Stop this cycle if the server is unavailable.
-                        if (!websocketService.isAuthenticated()) break;
-                    }
+                const entries = store.getState().contacts.friends.filter(friend =>
+                    friend.id.toLowerCase() !== currentUserId.toLowerCase());
+                if (activeId && activeId.toLowerCase() !== currentUserId.toLowerCase()) {
+                    await updateOne(activeId);
                 }
-                if (entries.length) cursor = (cursor + count) % entries.length;
+                if (cancelled || !websocketService.isAuthenticated()) return;
+                // Check ONE additional contact per cycle, not the entire list.
+                // Other contacts will gradually receive presence indicators.
+                const background = entries.filter(friend => friend.id.toLowerCase() !== activeId?.toLowerCase());
+                if (background.length) {
+                    const next = background[cursor % background.length];
+                    cursor++;
+                    await updateOne(next.id);
+                }
             } finally { running = false; }
         };
-        const timer = window.setInterval(() => void checkPresence(), 20000);
-        const onVisible = () => { if (document.visibilityState === 'visible') void checkPresence(); };
+        const timer = window.setInterval(() => void checkPresence(), 15000);
+        const onVisible = () => {
+            if (document.visibilityState === 'visible') void checkPresence();
+        };
         document.addEventListener('visibilitychange', onVisible);
         window.addEventListener('focus', onVisible);
         void checkPresence();
@@ -240,7 +276,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             document.removeEventListener('visibilitychange', onVisible);
             window.removeEventListener('focus', onVisible);
         };
-    }, [currentUserId, connectionStatus, contactsInitialized, friends.length, dispatch, store]);
+    }, [currentUserId, connectionStatus, contactsInitialized, selectedChat?.id, selectedChat?.kind, dispatch, store]);
 
     // Không tải lịch sử của toàn bộ danh bạ khi đăng nhập.
     // GET_PEOPLE_CHAT_MES không có request ID nên các yêu cầu phải tuần tự;
@@ -591,6 +627,8 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                                 : <>
 
                                     <ChatWindow chat={currentChat} currentUserId={currentUserId} onMessageSent={refreshUserList}
+                                                presenceError={presenceError} presenceChecking={presenceChecking}
+                                                onCheckPresence={checkSelectedPresence}
                                                 onRoomLeft={(roomName) => {dispatch(removeGroup(roomName));dispatch(clearConversationMessages(roomChatId(roomName)));setUnreadLedger(previous => markChatRead(previous, roomChatId(roomName)));setSelectedChat(null);void refreshUserList();}}/>
                                 </>}
                     <div className="lyra-status-dock">
