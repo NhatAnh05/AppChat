@@ -1,6 +1,7 @@
 import { parseChatTime } from "../utils/chatTime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
+import { createPortal } from "react-dom";
 import { fetchPeopleChatHistory, fetchRoomChatHistory, addMessage } from "../features/messages/messagesSlice";
 import type { AppDispatch, RootState } from "../store/store";
 import type { ChatMessage } from "../types/chat";
@@ -19,24 +20,27 @@ type MessageListProps = {
   username: string;
   isPeopleChat: boolean;
   onReply?: (reply: ReplyReference) => void;
+  toolsOpen?: boolean;
+  onCloseTools?: () => void;
 };
 type ViewMode = 'all' | 'saved' | 'media';
 type MediaFilter = 'all' | 'image' | 'video' | 'file';
 type ForwardTarget = {id: string; name: string; kind: 'people' | 'group'};
 
-export default function MessageList({ chatId, currentUserId, username, isPeopleChat, onReply }: MessageListProps) {
+export default function MessageList({ chatId, currentUserId, username, isPeopleChat, onReply, toolsOpen = false, onCloseTools }: MessageListProps) {
   const dispatch = useDispatch<AppDispatch>();
   const [pending, setPending] = useState<ReactionEvent[]>([]);
   const [reactionError, setReactionError] = useState<string | null>(null);
   const pendingRef = useRef<ReactionEvent[]>([]);
   const pendingSequence = useRef(0);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const nearBottomRef = useRef(true);
+  const lastChatIdRef = useRef(chatId);
   const messages = useSelector((state: RootState) => state.messages.messages);
   const history = useSelector((state: RootState) => state.messages.historyByChat[chatId]);
   const friends = useSelector((state: RootState) => state.contacts.friends);
   const groups = useSelector((state: RootState) => state.contacts.groups);
   const [view, setView] = useState<ViewMode>('all');
-  const [toolsExpanded, setToolsExpanded] = useState(false);
   const [search, setSearch] = useState('');
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>('all');
   const [bookmarks, setBookmarks] = useState<string[]>(() => readMessageBookmarks(currentUserId, chatId));
@@ -100,11 +104,23 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
   const firstPageLoaded = history?.loadedPages.includes(1) ?? false;
   const nextPage = Math.max(0, ...(history?.loadedPages ?? [])) + 1;
 
+  // Chỉ cuộn vùng danh sách, không dùng scrollIntoView() vì nó cuộn cả
+  // các vùng tổ tiên và có thể gây lỗi vẽ lại khi lịch sử cập nhật liên tục.
   useEffect(() => {
-    if (firstPageLoaded && view === 'all' && !search.trim()) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    const list = listRef.current;
+    if (!list || !firstPageLoaded || view !== 'all' || search.trim()) return;
+    const switchedConversation = lastChatIdRef.current !== chatId;
+    if (switchedConversation || nearBottomRef.current) {
+      list.scrollTop = list.scrollHeight;
     }
+    lastChatIdRef.current = chatId;
   }, [chatId, firstPageLoaded, latestMessageId, view, search]);
+
+  const handleHistoryScroll = () => {
+    const list = listRef.current;
+    if (!list) return;
+    nearBottomRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 160;
+  };
   const loadPage = (page: number) => {
     void dispatch(isPeopleChat ? fetchPeopleChatHistory({username, chatId, page}) : fetchRoomChatHistory({username, chatId, page}));
   };
@@ -155,36 +171,22 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
   };
   const jumpTo = (id: string) => {
     setView('all'); setSearch('');
-    window.requestAnimationFrame(() => document.getElementById(`lyra-message-${CSS.escape(id)}`)?.scrollIntoView({behavior:'smooth',block:'center'}));
+    window.requestAnimationFrame(() => {
+      const list = listRef.current;
+      const target = document.getElementById(`lyra-message-${CSS.escape(id)}`);
+      if (!list || !target) return;
+      const listRect = list.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      list.scrollTo({
+        top: list.scrollTop + targetRect.top - listRect.top - list.clientHeight / 2 + targetRect.height / 2,
+        behavior: 'smooth',
+      });
+    });
   };
 
   return (
-    <div className="message-list">
-      <section className="lyra-workspace-toolbar" aria-label="Công cụ tin nhắn">
-        <div className="lyra-workspace-heading">
-          <strong><i className="bi bi-chat-dots" /> Tin nhắn</strong>
-          <button type="button" aria-expanded={toolsExpanded} aria-controls="lyra-workspace-tools" onClick={() => setToolsExpanded(old => !old)}>
-            <i className={`bi bi-${toolsExpanded?'chevron-up':'sliders'}`} /> {toolsExpanded ? 'Thu gọn' : 'Công cụ'}
-          </button>
-        </div>
-        {toolsExpanded && <div id="lyra-workspace-tools" className="lyra-workspace-expandable">
-        <div className="lyra-workspace-tabs">
-          <button type="button" className={view==='all'?'is-active':''} onClick={() => setView('all')}><i className="bi bi-chat-dots"/> Tin nhắn</button>
-          <button type="button" className={view==='saved'?'is-active':''} onClick={() => setView('saved')}><i className="bi bi-bookmark-star"/> Đã lưu ({bookmarkedCount})</button>
-          <button type="button" className={view==='media'?'is-active':''} onClick={() => setView('media')}><i className="bi bi-images"/> Ảnh & tệp ({library.length})</button>
-          <button type="button" className={selecting?'is-active':''} onClick={() => {setSelecting(!selecting);setSelectedIds([]);setView('all');}}><i className="bi bi-check2-square"/> Chọn nhiều</button>
-        </div>
-        {view !== 'media' ? <label className="lyra-workspace-search"><i className="bi bi-search" aria-hidden="true"/>
-            <input type="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Tìm tin nhắn đã tải (hỗ trợ không dấu)..." aria-label="Tìm tin nhắn trong hội thoại" />
-            {search && <button type="button" onClick={()=>setSearch('')} aria-label="Xóa tìm kiếm">×</button>}
-          </label> : <label className="lyra-workspace-media-filter">Lọc tệp
-            <select value={mediaFilter} onChange={e=>setMediaFilter(e.target.value as MediaFilter)}>
-              <option value="all">Tất cả</option><option value="image">Ảnh & GIF</option><option value="video">Video</option><option value="file">Tệp</option>
-            </select>
-          </label>}
-        <small>Chỉ tìm trong những tin nhắn đã tải. Dùng “Tải tin nhắn cũ hơn” để mở rộng kết quả.</small>
-        </div>}
-      </section>
+    <div className="lyra-conversation-content">
+      <div className="message-list" ref={listRef} onScroll={handleHistoryScroll} role="log" aria-label="Lịch sử tin nhắn">
       {feedback && <div className="lyra-workspace-feedback" role="status">{feedback}<button onClick={()=>setFeedback('')} type="button" aria-label="Đóng thông báo">×</button></div>}
       {selecting && <div className="lyra-workspace-selection" role="region" aria-label="Thao tác với tin nhắn đã chọn">
         <span>Đã chọn {selectedIds.length} tin</span>
@@ -217,7 +219,32 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
           highlighted={Boolean(search.trim())}
         />)}
       </>}
-      <div ref={bottomRef}/>
+      </div>
+      {toolsOpen && createPortal(<div className={`lyra-tools-modal-backdrop${document.querySelector('.theme-dark') ? ' theme-dark' : ''}`} onMouseDown={event => { if (event.target === event.currentTarget) onCloseTools?.(); }}>
+        <section className="lyra-tools-dialog" role="dialog" aria-modal="true" aria-label="Công cụ tin nhắn">
+          <header className="lyra-tools-dialog-header">
+            <strong><i className="bi bi-sliders" aria-hidden="true" /> Công cụ tin nhắn</strong>
+            <button type="button" aria-label="Đóng công cụ" onClick={onCloseTools}><i className="bi bi-x-lg" /></button>
+          </header>
+          <div className="lyra-workspace-expandable">
+            <div className="lyra-workspace-tabs">
+              <button type="button" className={view==='all'?'is-active':''} onClick={() => { setView('all'); onCloseTools?.(); }}><i className="bi bi-chat-dots"/> Tin nhắn</button>
+              <button type="button" className={view==='saved'?'is-active':''} onClick={() => { setView('saved'); onCloseTools?.(); }}><i className="bi bi-bookmark-star"/> Đã lưu ({bookmarkedCount})</button>
+              <button type="button" className={view==='media'?'is-active':''} onClick={() => { setView('media'); onCloseTools?.(); }}><i className="bi bi-images"/> Ảnh & tệp ({library.length})</button>
+              <button type="button" className={selecting?'is-active':''} onClick={() => { setSelecting(!selecting); setSelectedIds([]); setView('all'); onCloseTools?.(); }}><i className="bi bi-check2-square"/> Chọn nhiều</button>
+            </div>
+            {view !== 'media' ? <label className="lyra-workspace-search"><i className="bi bi-search" aria-hidden="true"/>
+              <input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Tìm tin nhắn đã tải (hỗ trợ không dấu)..." aria-label="Tìm tin nhắn trong hội thoại" />
+              {search && <button type="button" onClick={() => setSearch('')} aria-label="Xóa tìm kiếm">×</button>}
+            </label> : <label className="lyra-workspace-media-filter">Lọc tệp
+              <select value={mediaFilter} onChange={event => setMediaFilter(event.target.value as MediaFilter)}>
+                <option value="all">Tất cả</option><option value="image">Ảnh & GIF</option><option value="video">Video</option><option value="file">Tệp</option>
+              </select>
+            </label>}
+            <small>Chỉ tìm trong những tin đã tải. Bấm Đóng để xem kết quả.</small>
+          </div>
+        </section>
+      </div>, document.body)}
       {forwardIds.length>0 && <div className="lyra-overlay" onMouseDown={e=>{if(e.target===e.currentTarget&&!forwardBusy)setForwardIds([]);}}>
         <section className="lyra-workspace-forward-dialog" role="dialog" aria-modal="true" aria-label="Chuyển tiếp tin nhắn">
           <h3>Chuyển tiếp {forwardIds.length} tin nhắn</h3>

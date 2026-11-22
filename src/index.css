@@ -129,9 +129,19 @@ button { color: inherit; }
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-width: 0;
+  min-height: 0;
   padding: 20px;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   background: #f8fafc;
+}
+
+/* Chat dài: mỗi tin nhắn phải giữ chiều cao tự nhiên, không bị flex ép thành vạch mỏng. */
+.message-list > .message-row {
+  flex: 0 0 auto;
+  min-height: max-content;
 }
 
 .message-list::-webkit-scrollbar {
@@ -164,7 +174,8 @@ button { color: inherit; }
 
 .message-content-wrap {
   min-width: 0;
-  max-width: 78%;
+  max-width: min(78%, 680px);
+  flex: 0 1 auto;
 }
 
 .message-meta {
@@ -201,11 +212,15 @@ button { color: inherit; }
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  min-width: 0;
 }
 
 .message-bubble {
+  width: auto;
+  height: auto;
   max-width: 100%;
   min-width: 0;
+  min-height: 34px;
   padding: 10px 14px;
   border-radius: 16px;
   overflow-wrap: anywhere;
@@ -243,6 +258,8 @@ button { color: inherit; }
   font-size: 14px;
   line-height: 1.5;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .empty-messages {

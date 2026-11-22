@@ -11,6 +11,7 @@ import type { CreatedRoomMember } from '../services/createRoomProtocol.ts'
 import { readableGroupError } from '../services/groupManagement.ts'
 import { isHistoryUnsupported } from '../services/chatHistoryTransport.ts'
 import { normalizeSearch } from '../services/messageWorkspace.ts'
+import { HISTORY_REFRESH_MS } from '../services/chatRefreshPolicy.ts'
 
 type ChatWindowProps = {
     chat: Chat | null
@@ -25,6 +26,7 @@ type ChatWindowProps = {
 export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLeft, onCheckPresence, presenceError, presenceChecking}: ChatWindowProps) {
     const dispatch = useDispatch<AppDispatch>()
     const [detailOpen, setDetailOpen] = useState(false)
+    const [toolsOpen, setToolsOpen] = useState(false)
     const [members, setMembers] = useState<CreatedRoomMember[]>([])
     const [memberQuery, setMemberQuery] = useState('')
     const [groupFeedback, setGroupFeedback] = useState('')
@@ -41,19 +43,19 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
         void dispatch(chat.kind === 'group' ? fetchRoomChatHistory({username:chat.name,chatId:chat.id,page:1}) : fetchPeopleChatHistory({username: chat.name, chatId: chat.id, page: 1}))
     }, [chat?.id, chat?.kind, chat?.name, dispatch])
 
-    // WebSocket của API có thể không đẩy SEND_CHAT đến người nhận.
-    // Chỉ đồng bộ hội thoại đang mở, thưa hơn để giảm nghẽn request history.
+    // Nhận tin mới qua SEND_CHAT. Đồng bộ dự phòng chỉ một lần/phút, KHÔNG gọi
+    // thêm mỗi lần cửa sổ focus (Edge thường phát sinh rất nhiều focus events).
     useEffect(() => {
         if (!chat) return;
         const refresh = () => {
-            if (!isHistoryUnsupported(chat.kind === 'group' ? 'room' : 'people') &&
-                document.visibilityState === 'visible' && navigator.onLine) {
-                void dispatch(chat.kind === 'group' ? fetchRoomChatHistory({username:chat.name,chatId:chat.id,page:1,force:true}) : fetchPeopleChatHistory({username: chat.name, chatId: chat.id, page: 1, force: true}));
-            }
+            if (isHistoryUnsupported(chat.kind === 'group' ? 'room' : 'people') ||
+                document.visibilityState !== 'visible' || !navigator.onLine || !document.hasFocus()) return;
+            void dispatch(chat.kind === 'group'
+                ? fetchRoomChatHistory({username: chat.name, chatId: chat.id, page: 1, force: true})
+                : fetchPeopleChatHistory({username: chat.name, chatId: chat.id, page: 1, force: true}));
         };
-        const interval = window.setInterval(refresh, 10000);
-        window.addEventListener('focus', refresh);
-        return () => { window.clearInterval(interval); window.removeEventListener('focus', refresh); };
+        const interval = window.setInterval(refresh, HISTORY_REFRESH_MS);
+        return () => window.clearInterval(interval);
     }, [chat?.id, chat?.kind, chat?.name, dispatch]);
 
     const openDetails = async () => {
@@ -126,6 +128,7 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
                     {chat.kind === 'people' && presenceError && <small role="status" title={presenceError} style={{color:'#b45309',fontSize:'11px'}}>Không kiểm tra được: {presenceError}</small>}
                 </div>
                 <div className="chat-header-actions">
+                    <button type="button" className="chat-tools-trigger" title="Công cụ tin nhắn" aria-label="Mở công cụ tin nhắn" aria-expanded={toolsOpen} onClick={() => setToolsOpen(old => !old)}><i className="bi bi-sliders" /> <span>Công cụ</span></button>
                     {chat.kind === 'people' && <button type="button" aria-label="Kiểm tra trạng thái hoạt động" title="Kiểm tra online ngay và xem lỗi nếu API không phản hồi" disabled={presenceChecking} onClick={() => void onCheckPresence?.(chat.id)}><i className={`bi bi-${presenceChecking ? 'hourglass-split' : 'arrow-clockwise'}`} /></button>}
                     <button type="button" title="Gọi thoại" aria-label="Gọi thoại" onClick={() => setCallMode("voice")}><i className="bi bi-telephone" /></button>
                     <button type="button" title="Gọi video" aria-label="Gọi video" onClick={() => setCallMode("video")}><i className="bi bi-camera-video" /></button>
@@ -208,6 +211,8 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
                 username={chat.name}
                 isPeopleChat={chat.kind === 'people'}
                 onReply={setReplyTo}
+                toolsOpen={toolsOpen}
+                onCloseTools={() => setToolsOpen(false)}
             />
 
             <MessageInput

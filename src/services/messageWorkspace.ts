@@ -10,7 +10,10 @@ export function humanText(message: ChatMessage): string {
 }
 
 export function isUserMessage(message: ChatMessage): boolean {
-  return parseInteraction(message.content)?.kind !== 'reaction';
+  // Một số phản hồi lịch sử thiếu nội dung; không dựng bong bóng chat rỗng.
+  // Tin reaction là sự kiện nội bộ, không phải tin nhắn hiển thị riêng.
+  return parseInteraction(message.content)?.kind !== 'reaction'
+    && visibleMessageContent(message.content).trim().length > 0;
 }
 
 export function normalizeSearch(value: string): string {

@@ -1,5 +1,5 @@
 import { parseChatTime, formatChatTime } from "./utils/chatTime";
-import {useEffect, useMemo, useState, type FormEvent} from "react";
+import {useEffect, useMemo, useState, useRef, type FormEvent} from "react";
 import {useDispatch, useSelector, useStore} from "react-redux";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { ChatList } from "./components/ChatList";
@@ -28,6 +28,7 @@ import "./App.css";
 import { decodeChatContent } from "./services/chatContentCodec";
 import {userService} from "./services/userService.ts";
 import { notifyIncomingMessage } from "./services/desktopNotifications.ts";
+import { PRESENCE_REFRESH_MS } from "./services/chatRefreshPolicy.ts";
 import { logoutCurrentSession } from "./services/logoutService.ts";
 import { clearContacts, setContactOnline, clearOnlineStatuses } from "./features/contacts/contactsSlice";
 import { subscribeConnectionState } from "./services/connectionHealth.ts";
@@ -74,6 +75,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const [logoutBusy, setLogoutBusy] = useState(false);
     const [apiLogOpen, setApiLogOpen] = useState(false);
     const [apiLogs, setApiLogs] = useState<ApiLogEntry[]>([]);
+    const apiLogBuffer = useRef<ApiLogEntry[]>([]);
     const [connectionStatus, setConnectionStatus] = useState<WebSocketState>(websocketService.getStatus());
     const [pinnedIds] = useState<string[]>(() => {
         try { return JSON.parse(localStorage.getItem(`lyra-pins-${currentUserId}`) || "[]") as string[]; }
@@ -105,7 +107,12 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             navigate('/login', {replace:true});
         }
     }), [dispatch, navigate]);
-    useEffect(() => websocketService.onLog(entry => setApiLogs(current => [...current.slice(-199), entry])), []);
+    // Lưu nhật ký trong ref: không render lại TOÀN BỘ trang chat theo mỗi frame WebSocket.
+    // Chỉ cập nhật React state khi cửa sổ Nhật ký thực sự mở.
+    useEffect(() => websocketService.onLog(entry => {
+        apiLogBuffer.current = [...apiLogBuffer.current.slice(-199), entry];
+        if (apiLogOpen) setApiLogs([...apiLogBuffer.current]);
+    }), [apiLogOpen]);
     useEffect(() => localStorage.setItem(`lyra-pins-${currentUserId}`, JSON.stringify(pinnedIds)), [pinnedIds, currentUserId]);
     const messages = useSelector((state: RootState) => state.messages.messages);
     useEffect(() => saveUnreadLedger(currentUserId, unreadLedger), [currentUserId, unreadLedger]);
@@ -225,66 +232,34 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         }
     };
 
-    // The active conversation takes precedence over background presence checks.
-    // API 15 has no request ID and checks are serialized in userService.
-    // Do not queue checks for 20 people (20 * timeout) ahead of the active chat.
+    // Chỉ kiểm tra người đang trò chuyện. Không quét nền cả danh bạ mỗi 15 giây:
+    // phần lớn API online không có requestId nên một danh sách dài dễ nghẽn WebSocket.
     useEffect(() => {
-        let cancelled = false;
-        let running = false;
-        let cursor = 0;
         const activeId = selectedChat?.kind === 'people' ? selectedChat.id : null;
-        setPresenceError(null);
-        const updateOne = async (id: string) => {
+        if (!activeId || connectionStatus !== 'CONNECTED' || !contactsInitialized) return;
+        let cancelled = false;
+        let checking = false;
+        const checkActive = async () => {
+            if (cancelled || checking || !websocketService.isAuthenticated() ||
+                userService.isOnlineCheckUnsupported() || !navigator.onLine ||
+                document.visibilityState !== 'visible') return;
+            checking = true;
             try {
-                const online = await userService.checkUserOnline(id);
+                const online = await userService.checkUserOnline(activeId);
                 if (!cancelled && websocketService.isAuthenticated()) {
-                    dispatch(setContactOnline({ id, online }));
-                    if (id.toLowerCase() === activeId?.toLowerCase()) setPresenceError(null);
+                    dispatch(setContactOnline({id: activeId, online}));
+                    setPresenceError(null);
                 }
             } catch (error) {
-                // A timeout or invalid response means unknown, not offline.
-                // Log which user failed so API troubleshooting is possible.
-                if (!userService.isOnlineCheckUnsupported()) console.warn('[LyraChat] Không xác minh được trạng thái:', id, error);
-                if (!cancelled && id.toLowerCase() === activeId?.toLowerCase()) {
-                    setPresenceError(error instanceof Error ? error.message : 'Kiểm tra trạng thái thất bại.');
+                if (!cancelled && !userService.isOnlineCheckUnsupported()) {
+                    setPresenceError(error instanceof Error ? error.message : 'Không kiểm tra được trạng thái.');
                 }
-            }
+            } finally { checking = false; }
         };
-        const checkPresence = async () => {
-            if (cancelled || running || userService.isOnlineCheckUnsupported() || !websocketService.isAuthenticated() ||
-                !navigator.onLine || document.visibilityState !== 'visible') return;
-            running = true;
-            try {
-                const entries = store.getState().contacts.friends.filter(friend =>
-                    friend.id.toLowerCase() !== currentUserId.toLowerCase());
-                if (activeId && activeId.toLowerCase() !== currentUserId.toLowerCase()) {
-                    await updateOne(activeId);
-                }
-                if (cancelled || !websocketService.isAuthenticated()) return;
-                // Check ONE additional contact per cycle, not the entire list.
-                // Other contacts will gradually receive presence indicators.
-                const background = entries.filter(friend => friend.id.toLowerCase() !== activeId?.toLowerCase());
-                if (background.length) {
-                    const next = background[cursor % background.length];
-                    cursor++;
-                    await updateOne(next.id);
-                }
-            } finally { running = false; }
-        };
-        const timer = window.setInterval(() => void checkPresence(), 15000);
-        const onVisible = () => {
-            if (document.visibilityState === 'visible') void checkPresence();
-        };
-        document.addEventListener('visibilitychange', onVisible);
-        window.addEventListener('focus', onVisible);
-        void checkPresence();
-        return () => {
-            cancelled = true;
-            window.clearInterval(timer);
-            document.removeEventListener('visibilitychange', onVisible);
-            window.removeEventListener('focus', onVisible);
-        };
-    }, [currentUserId, connectionStatus, contactsInitialized, selectedChat?.id, selectedChat?.kind, dispatch, store]);
+        void checkActive();
+        const interval = window.setInterval(() => void checkActive(), PRESENCE_REFRESH_MS);
+        return () => { cancelled = true; window.clearInterval(interval); };
+    }, [currentUserId, connectionStatus, contactsInitialized, selectedChat?.id, selectedChat?.kind, dispatch]);
 
     // Không tải lịch sử của toàn bộ danh bạ khi đăng nhập.
     // CHAT_PEOPLE_GET_MES không có request ID nên các yêu cầu phải tuần tự;
@@ -681,7 +656,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                         <button onClick={() => void refreshChats()}><i className="bi bi-arrow-repeat"/> Làm mới hội thoại</button>
                         <button onClick={exportHistory}><i className="bi bi-download"/> Sao lưu lịch sử</button>
                         <label className="dock-upload"><i className="bi bi-upload"/> Nhập lịch sử<input type="file" accept=".json,application/json" onChange={(event) => {void importHistory(event.target.files?.[0]); event.target.value = "";}}/></label>
-                        <button onClick={() => setApiLogOpen(true)}><i className="bi bi-file-earmark-text"/> Nhật ký API</button>
+                        <button onClick={() => {setApiLogs([...apiLogBuffer.current]);setApiLogOpen(true);}}><i className="bi bi-file-earmark-text"/> Nhật ký API</button>
                     </div>
                 </section>
             </>}
@@ -699,7 +674,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                     <div className="lyra-modal-actions"><button type="button" disabled={composeBusy} onClick={() => setComposeOpen(false)}>Hủy</button><button type="submit" disabled={composeBusy || !composeValue.trim()}>{composeBusy ? "Đang chờ máy chủ..." : composeMode === "group" ? "Tạo nhóm" : composeMode === "join" ? "Tham gia" : "Bắt đầu trò chuyện"}</button></div>
                 </form>
             </div>}
-            {apiLogOpen && <div className="lyra-modal-backdrop" onMouseDown={e => {if (e.target === e.currentTarget) setApiLogOpen(false);}}><div className="lyra-modal lyra-log-modal"><h2>Nhật ký API WebSocket</h2><p>Chỉ hiển thị loại sự kiện, trạng thái và thời gian, không hiển thị mật khẩu hoặc nội dung tin nhắn.</p><div className="lyra-log-list">{apiLogs.length ? [...apiLogs].reverse().map((entry, index) => <div key={index}><time>{entry.at}</time><strong>{entry.direction}</strong><span>{entry.event}</span><small>{entry.status}</small></div>) : <p>Chưa có sự kiện mới kể từ khi mở ứng dụng.</p>}</div><div className="lyra-modal-actions"><button type="button" onClick={() => setApiLogs([])}>Xóa nhật ký</button><button type="button" onClick={() => setApiLogOpen(false)}>Đóng</button></div></div></div>}
+            {apiLogOpen && <div className="lyra-modal-backdrop" onMouseDown={e => {if (e.target === e.currentTarget) setApiLogOpen(false);}}><div className="lyra-modal lyra-log-modal"><h2>Nhật ký API WebSocket</h2><p>Chỉ hiển thị loại sự kiện, trạng thái và thời gian, không hiển thị mật khẩu hoặc nội dung tin nhắn.</p><div className="lyra-log-list">{apiLogs.length ? [...apiLogs].reverse().map((entry, index) => <div key={index}><time>{entry.at}</time><strong>{entry.direction}</strong><span>{entry.event}</span><small>{entry.status}</small></div>) : <p>Chưa có sự kiện mới kể từ khi mở ứng dụng.</p>}</div><div className="lyra-modal-actions"><button type="button" onClick={() => {apiLogBuffer.current=[];setApiLogs([]);}}>Xóa nhật ký</button><button type="button" onClick={() => setApiLogOpen(false)}>Đóng</button></div></div></div>}
         </main>
     );
 }

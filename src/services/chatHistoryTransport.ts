@@ -1,6 +1,7 @@
 /**
- * API contract: both people and room history use CHAT_PEOPLE_GET_MES.
- * The teacher server may return GET_ROOM_CHAT_MES for room errors.
+ * API documentation uses CHAT_PEOPLE_GET_MES for both kinds of history.
+ * The live server currently accepts GET_PEOPLE_CHAT_MES for 1:1 history.
+ * Keep both aliases so older/newer server deployments remain compatible.
  * There is no request ID in responses, so all history requests share ONE queue.
  */
 import { ensureLoginConnection } from './loginService.ts';
@@ -41,7 +42,11 @@ export function resetHistoryCompatibility(): void {
 }
 
 export function historyEventCandidates(kind: HistoryKind): string[] {
-  const first = preferredEvent.get(kind) ?? HISTORY_EVENT;
+  // On the currently deployed server, 1:1 requests using the documented
+  // event generate ACTION_NOT_EXIT. Ask the proven working alias FIRST to
+  // avoid one spurious error on every new socket / browser refresh.
+  // Room history has not been verified with that alias: keep documented first.
+  const first = preferredEvent.get(kind) ?? (kind === 'people' ? ALTERNATES.people : HISTORY_EVENT);
   return [...new Set([first, HISTORY_EVENT, ALTERNATES[kind]])];
 }
 

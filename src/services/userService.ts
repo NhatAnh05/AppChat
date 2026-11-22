@@ -1,5 +1,5 @@
 import { ensureLoginConnection } from "./loginService.ts";
-import { websocketService, type WebSocketMessage } from "./websocket";
+import { websocketService, type WebSocketMessage } from "./websocket.ts";
 import { withApiProbeGate } from "./apiProbeGate.ts";
 
 
@@ -7,7 +7,9 @@ type UserCheckResponse = { status?: unknown };
 
 // Phản hồi kiểm tra online không có requestId/username: chỉ gửi một yêu cầu mỗi lần.
 let pendingCheck: Promise<unknown> = Promise.resolve();
-let onlineProtocol: 'documented' | 'alternate' | 'unsupported' = 'documented';
+// Runtime API evidence: CHECK_USER_ONLINE succeeds while
+// CHAT_CHECK_USER_ONLINE produces ACTION_NOT_EXIT on this deployment.
+let onlineProtocol: 'documented' | 'alternate' | 'unsupported' = 'alternate';
 let checkedSocket: WebSocket | null = null;
 const UNSUPPORTED_MESSAGE = 'Máy chủ hiện không hỗ trợ API kiểm tra Online/Offline (ACTION_NOT_EXIT).';
 
@@ -67,23 +69,22 @@ async function checkUserOnline(username: string): Promise<boolean> {
         const socket = websocketService.getSocket();
         if (checkedSocket !== socket) {
             checkedSocket = socket;
-            onlineProtocol = 'documented';
+            onlineProtocol = 'alternate';
         }
         if (onlineProtocol === 'unsupported') throw new Error(UNSUPPORTED_MESSAGE);
 
-        // Tài liệu Excel dùng CHAT_CHECK_USER_ONLINE, nhưng server thực tế đã trả
-        // ACTION_NOT_EXIT. Thử duy nhất một lần tên sự kiện thông dụng khác.
-        // Nếu cả hai không được server hỗ trợ, ngừng polling tránh spam WebSocket.
-        if (onlineProtocol === 'documented') {
+        // Prefer the event observed to work with the live teacher server.
+        // The documented event remains the fallback for other deployments.
+        if (onlineProtocol === 'alternate') {
             try {
-                return await checkResponse('CHAT_CHECK_USER_ONLINE', 'CHECK_USER_ONLINE', username);
+                return await checkResponse('CHECK_USER_ONLINE', 'CHECK_USER_ONLINE', username);
             } catch (error) {
                 if (!(error instanceof Error) || error.message !== 'ACTION_NOT_EXIT') throw error;
-                onlineProtocol = 'alternate';
+                onlineProtocol = 'documented';
             }
         }
         try {
-            return await checkResponse('CHECK_USER_ONLINE', 'CHECK_USER_ONLINE', username);
+            return await checkResponse('CHAT_CHECK_USER_ONLINE', 'CHECK_USER_ONLINE', username);
         } catch (error) {
             if (error instanceof Error && error.message === 'ACTION_NOT_EXIT') {
                 onlineProtocol = 'unsupported';

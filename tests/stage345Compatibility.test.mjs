@@ -8,10 +8,10 @@ import { normalizeSearch } from '../src/services/messageWorkspace.ts';
 const room = { name: 'Nhom_HocTap', user: [{id:1,name:'Nguyen'}], chatMess: [{id:5,name:'Nguyen',to:'Nhom_HocTap',mes:'Chao',type:1,createAt:'2026-11-22 22:00:00'}] };
 const people = [{id:6,name:'A',to:'B',mes:'Hi',type:0,createAt:'2026-11-22 22:00:00'}];
 
-test('Giai đoạn 3: dùng sự kiện Excel trước, có phương án tương thích khi ACTION_NOT_EXIT', () => {
+test('Lịch sử cá nhân ưu tiên event server đã xác nhận, vẫn có fallback theo Excel', () => {
   resetHistoryCompatibility();
-  assert.equal(historyEventCandidates('people')[0], HISTORY_EVENT);
-  assert.deepEqual(historyEventCandidates('people'), ['CHAT_PEOPLE_GET_MES', 'GET_PEOPLE_CHAT_MES']);
+  assert.equal(historyEventCandidates('people')[0], 'GET_PEOPLE_CHAT_MES');
+  assert.deepEqual(historyEventCandidates('people'), ['GET_PEOPLE_CHAT_MES', 'CHAT_PEOPLE_GET_MES']);
   assert.deepEqual(historyEventCandidates('room'), ['CHAT_PEOPLE_GET_MES', 'GET_ROOM_CHAT_MES']);
 });
 test('Giai đoạn 3: nhận đúng phản hồi cũ và mới, không trộn room/people', () => {
