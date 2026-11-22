@@ -72,7 +72,7 @@ export function parseRoomHistoryResponse(input:unknown, name:string):
   | {status:'error';message:string} | null {
   // Tài liệu: phản hồi thành công là CHAT_PEOPLE_GET_MES; lỗi phòng có thể là GET_ROOM_CHAT_MES.
   const frame=parseFrame(input,CHAT_HISTORY_EVENT) ?? parseFrame(input,ROOM_HISTORY_ERROR_EVENT);
-  if(!frame || (frame.event === ROOM_HISTORY_ERROR_EVENT && frame.status !== 'error'))return null;
+  if(!frame)return null;
   if(frame.status==='error')return {status:'error',message:typeof frame.mes==='string'?frame.mes:'Không tải được lịch sử nhóm.'};
   if(frame.status!=='success')return {status:'error',message:'Máy chủ chưa xác nhận lịch sử nhóm.'};
   const room=parseRoom(frame.data);

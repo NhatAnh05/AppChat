@@ -9,6 +9,8 @@ import type { ReplyReference } from '../services/messageInteractions'
 import { getRoomHistory, leaveRoom } from '../services/roomChatService.ts'
 import type { CreatedRoomMember } from '../services/createRoomProtocol.ts'
 import { readableGroupError } from '../services/groupManagement.ts'
+import { isHistoryUnsupported } from '../services/chatHistoryTransport.ts'
+import { normalizeSearch } from '../services/messageWorkspace.ts'
 
 type ChatWindowProps = {
     chat: Chat | null
@@ -24,6 +26,9 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
     const dispatch = useDispatch<AppDispatch>()
     const [detailOpen, setDetailOpen] = useState(false)
     const [members, setMembers] = useState<CreatedRoomMember[]>([])
+    const [memberQuery, setMemberQuery] = useState('')
+    const [groupFeedback, setGroupFeedback] = useState('')
+    const [mentionRequest, setMentionRequest] = useState<{id:number;text:string}|null>(null)
     const [roomError, setRoomError] = useState('')
     const [leaveBusy, setLeaveBusy] = useState(false)
     const [leaveConfirm, setLeaveConfirm] = useState(false)
@@ -41,7 +46,8 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
     useEffect(() => {
         if (!chat) return;
         const refresh = () => {
-            if (document.visibilityState === 'visible' && navigator.onLine) {
+            if (!isHistoryUnsupported(chat.kind === 'group' ? 'room' : 'people') &&
+                document.visibilityState === 'visible' && navigator.onLine) {
                 void dispatch(chat.kind === 'group' ? fetchRoomChatHistory({username:chat.name,chatId:chat.id,page:1,force:true}) : fetchPeopleChatHistory({username: chat.name, chatId: chat.id, page: 1, force: true}));
             }
         };
@@ -54,6 +60,8 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
         setDetailOpen(true);
         setRoomError('');
         setMembers([]);
+        setMemberQuery('');
+        setGroupFeedback('');
         setLeaveConfirm(false);
         if (chat?.kind === 'group') {
             setMembersLoading(true);
@@ -67,6 +75,16 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
             }
         }
     };
+    const copyGroupName = async () => {
+        if (!chat || chat.kind !== 'group') return;
+        try {
+            await navigator.clipboard.writeText(chat.name);
+            setGroupFeedback('Đã sao chép tên nhóm. Người khác có thể nhập tên này ở mục Tham gia nhóm.');
+        } catch {
+            setGroupFeedback('Không sao chép được. Bạn có thể chọn và sao chép tên phòng ở phía trên.');
+        }
+    };
+    const filteredMembers = members.filter(member => normalizeSearch(member.name).includes(normalizeSearch(memberQuery)));
     const handleLeave = async () => {
         if (!chat || chat.kind !== 'group' || leaveBusy || !leaveConfirm) return;
         setLeaveBusy(true);
@@ -132,12 +150,25 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
                         </div>
                         {membersLoading && <p className="lyra-small-note" role="status">Đang tải thành viên từ máy chủ...</p>}
                         {!membersLoading && !roomError && members.length === 0 && <p className="lyra-small-note">Chưa có dữ liệu thành viên.</p>}
+                        <div className="lyra-group-invitation">
+                            <button type="button" onClick={() => {void copyGroupName();}}><i className="bi bi-clipboard" /> Sao chép tên nhóm để mời</button>
+                            <small>Mời bằng tên phòng có sẵn của API, không tạo link hoặc API thêm người giả.</small>
+                        </div>
+                        {groupFeedback && <p className="lyra-small-note" role="status">{groupFeedback}</p>}
+                        <label className="lyra-group-member-search"><i className="bi bi-search" aria-hidden="true" />
+                            <input type="search" value={memberQuery} onChange={event => setMemberQuery(event.target.value)} placeholder="Tìm thành viên..." aria-label="Tìm thành viên nhóm" />
+                        </label>
                         <div className="lyra-group-member-list">
-                            {members.map(member => <div key={member.id} className="lyra-group-member">
+                            {filteredMembers.map(member => <div key={member.id} className="lyra-group-member">
                                 <span className="lyra-group-member-avatar">{member.name.slice(0, 2).toUpperCase()}</span>
                                 <span>{member.name}</span>
+                                <button type="button" className="lyra-group-mention" title={`Nhắc ${member.name} trong tin nhắn`} onClick={() => {
+                                    setMentionRequest({id:Date.now(), text:`@${member.name} `});
+                                    setDetailOpen(false);
+                                }}><i className="bi bi-at" /> Nhắc tên</button>
                             </div>)}
                         </div>
+                        {!membersLoading && !roomError && members.length > 0 && filteredMembers.length === 0 && <p className="lyra-small-note">Không tìm thấy thành viên.</p>}
                         {roomError && <p role="alert" className="login-error">{roomError}</p>}
                         {!leaveConfirm ? (
                             <button type="button" className="lyra-group-leave-trigger" onClick={() => { setRoomError(''); setLeaveConfirm(true); }}>
@@ -185,6 +216,7 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
                 currentUserId={currentUserId}
                 isGroup={chat.kind === 'group'}
                 replyTo={replyTo}
+                mentionRequest={mentionRequest}
                 onCancelReply={() => setReplyTo(null)}
                 onMessageSent={onMessageSent}
             />

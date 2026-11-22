@@ -1,5 +1,7 @@
 import { ensureLoginConnection } from "./loginService.ts";
 import { websocketService, type WebSocketMessage } from "./websocket";
+import { withApiProbeGate } from "./apiProbeGate.ts";
+
 
 type UserCheckResponse = { status?: unknown };
 
@@ -10,7 +12,7 @@ let checkedSocket: WebSocket | null = null;
 const UNSUPPORTED_MESSAGE = 'Máy chủ hiện không hỗ trợ API kiểm tra Online/Offline (ACTION_NOT_EXIT).';
 
 function serializedCheck<T>(operation: () => Promise<T>): Promise<T> {
-    const result = pendingCheck.catch(() => undefined).then(operation);
+    const result = pendingCheck.catch(() => undefined).then(() => withApiProbeGate(operation));
     pendingCheck = result.catch(() => undefined);
     return result;
 }

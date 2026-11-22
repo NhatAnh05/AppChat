@@ -27,6 +27,7 @@ import type { ContactEntry } from "./types/contact";
 import "./App.css";
 import { decodeChatContent } from "./services/chatContentCodec";
 import {userService} from "./services/userService.ts";
+import { notifyIncomingMessage } from "./services/desktopNotifications.ts";
 import { logoutCurrentSession } from "./services/logoutService.ts";
 import { clearContacts, setContactOnline, clearOnlineStatuses } from "./features/contacts/contactsSlice";
 import { subscribeConnectionState } from "./services/connectionHealth.ts";
@@ -194,6 +195,8 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         setUnreadLedger(previous => recordIncomingMessage(previous, incomingMessage, currentUserId,
             selectedChat?.id ?? null, document.visibilityState === 'visible' && document.hasFocus()));
         dispatch(addMessage(incomingMessage));
+        notifyIncomingMessage(currentUserId, incomingMessage.senderName ?? incomingMessage.senderId,
+            `${incomingMessage.chatId}:${incomingMessage.id}`);
     }), [currentUserId, dispatch, friends, groups, selectedChat?.id, store]);
 
     // Socket sau RE_LOGIN là một socket mới: cập nhật danh bạ từ Backend khi kết nối hồi phục.

@@ -58,3 +58,7 @@ Bản source này **đã gộp Giai đoạn 1 và Giai đoạn 2**, không cần
 - Chuyển tiếp tiếp tục dùng `SEND_CHAT`, **không bổ sung API giả**.
 
 Xem hướng dẫn thử nghiệm và giới hạn: [docs/GIAI_DOAN_2_TIEN_ICH_TIN_NHAN.md](docs/GIAI_DOAN_2_TIEN_ICH_TIN_NHAN.md).
+
+## Nâng cấp Giai đoạn 3–5 và sửa lỗi lịch sử
+
+Xem [`docs/GIAI_DOAN_3_4_5_KHAC_PHUC.md`](docs/GIAI_DOAN_3_4_5_KHAC_PHUC.md) để biết các thay đổi, hướng dẫn chạy WebStorm và checklist test với hai tài khoản. Khi server báo `ACTION_NOT_EXIT`, frontend chỉ thử một tên event lịch sử dự phòng và dừng thử tự động nếu không hỗ trợ; chức năng lịch sử vẫn phụ thuộc máy chủ.

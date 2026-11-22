@@ -36,6 +36,7 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
   const friends = useSelector((state: RootState) => state.contacts.friends);
   const groups = useSelector((state: RootState) => state.contacts.groups);
   const [view, setView] = useState<ViewMode>('all');
+  const [toolsExpanded, setToolsExpanded] = useState(false);
   const [search, setSearch] = useState('');
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>('all');
   const [bookmarks, setBookmarks] = useState<string[]>(() => readMessageBookmarks(currentUserId, chatId));
@@ -160,6 +161,13 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
   return (
     <div className="message-list">
       <section className="lyra-workspace-toolbar" aria-label="Công cụ tin nhắn">
+        <div className="lyra-workspace-heading">
+          <strong><i className="bi bi-chat-dots" /> Tin nhắn</strong>
+          <button type="button" aria-expanded={toolsExpanded} aria-controls="lyra-workspace-tools" onClick={() => setToolsExpanded(old => !old)}>
+            <i className={`bi bi-${toolsExpanded?'chevron-up':'sliders'}`} /> {toolsExpanded ? 'Thu gọn' : 'Công cụ'}
+          </button>
+        </div>
+        {toolsExpanded && <div id="lyra-workspace-tools" className="lyra-workspace-expandable">
         <div className="lyra-workspace-tabs">
           <button type="button" className={view==='all'?'is-active':''} onClick={() => setView('all')}><i className="bi bi-chat-dots"/> Tin nhắn</button>
           <button type="button" className={view==='saved'?'is-active':''} onClick={() => setView('saved')}><i className="bi bi-bookmark-star"/> Đã lưu ({bookmarkedCount})</button>
@@ -175,6 +183,7 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
             </select>
           </label>}
         <small>Chỉ tìm trong những tin nhắn đã tải. Dùng “Tải tin nhắn cũ hơn” để mở rộng kết quả.</small>
+        </div>}
       </section>
       {feedback && <div className="lyra-workspace-feedback" role="status">{feedback}<button onClick={()=>setFeedback('')} type="button" aria-label="Đóng thông báo">×</button></div>}
       {selecting && <div className="lyra-workspace-selection" role="region" aria-label="Thao tác với tin nhắn đã chọn">
@@ -186,7 +195,7 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
       {reactionError && <div className="history-error" role="alert"><span>Không đồng bộ được cảm xúc: {reactionError}</span><button type="button" onClick={()=>setReactionError(null)}>Đóng</button></div>}
       {history?.hasMore && <button className="history-load-more" type="button" onClick={()=>loadPage(nextPage)} disabled={history.loading}>{history.loading && nextPage>1?'Đang tải tin nhắn cũ hơn...':'Tải tin nhắn cũ hơn'}</button>}
       {history?.error && <div className="history-error" role="alert"><span>{history.error}</span><button type="button" onClick={()=>loadPage(firstPageLoaded?nextPage:1)} disabled={history.loading}>Thử lại</button></div>}
-      {(history?.loading || !history) && chatMessages.length===0 && <p className="empty-messages">Đang tải lịch sử tin nhắn...</p>}
+      {(history?.loading || !history) && !history?.error && chatMessages.length===0 && <p className="empty-messages">Đang tải lịch sử tin nhắn...</p>}
       {view === 'media' ? <div className="lyra-workspace-gallery">
         {mediaItems.length===0 ? <p className="empty-messages">Không có tệp tương ứng trong lịch sử đã tải.</p> : mediaItems.map(media => <article className="lyra-workspace-media-card" key={`${media.messageId}-${media.url}`}>
           {media.kind==='image'||media.kind==='gif' ? <img src={media.url} alt={media.name} loading="lazy"/> : <i className={`bi bi-${media.kind==='video'?'camera-video':'file-earmark-text'}`} aria-hidden="true"/>}
@@ -194,7 +203,7 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
           <div><button type="button" onClick={()=>jumpTo(media.messageId)}>Xem tin</button><a href={media.url} rel="noopener noreferrer" target="_blank">Mở tệp</a></div>
         </article>)}
       </div> : <>
-        {shownMessages.length===0 && !history?.loading && <p className="empty-messages">{view==='saved'?'Chưa có tin nhắn đã lưu trong phần lịch sử đang tải.':search?'Không tìm thấy tin nhắn phù hợp.':'Chưa có tin nhắn. Hãy bắt đầu trò chuyện!'}</p>}
+        {shownMessages.length===0 && !history?.loading && !history?.error && <p className="empty-messages">{view==='saved'?'Chưa có tin nhắn đã lưu trong phần lịch sử đang tải.':search?'Không tìm thấy tin nhắn phù hợp.':'Chưa có tin nhắn. Hãy bắt đầu trò chuyện!'}</p>}
         {shownMessages.map(message => <MessageItem key={`${message.chatId}-${message.id}`}
           message={message} currentUserId={currentUserId}
           reactions={Array.from(reactions.get(message.id)?.values()??[]).flatMap(set=>[...set])}
