@@ -5,6 +5,8 @@ import { normalizeRoomName, parseJoinRoomResponse, parseLeaveRoomResponse,
   parseRoomHistoryResponse, parseRoomSendResponse, makeRoomHistoryRequest,
   makeRoomMessageRequest, type RoomDetails } from './roomChatProtocol.ts';
 import type { ChatMessage } from '../types/chat.ts';
+import { requestChatHistory } from './chatHistoryTransport.ts';
+import { enqueueChatSend } from './chatSendQueue.ts';
 
 type Options={timeoutMs?:number;signal?:AbortSignal};
 const TIMEOUT=10000;
@@ -62,25 +64,23 @@ export async function leaveRoom(rawName:string,options:Options={}):Promise<void>
     return true;
   },options).then(()=>undefined));
 }
+/** Lịch sử cá nhân và nhóm chia sẻ đúng một hàng đợi vì server dùng cùng event. */
 export async function getRoomHistory(rawName:string,page=1,options:Options={}):Promise<{room:RoomDetails;messages:ChatMessage[]}>{
   const name=normalizeRoomName(rawName);
-  makeRoomHistoryRequest(name,page);
-  return serialize('GET_ROOM_CHAT_MES',()=>request('GET_ROOM_CHAT_MES',{name,page},frame=>{
-    // The event is shared across rooms; ignore a delayed response for another room.
-    const receivedName = (frame.data && typeof frame.data === 'object' && 'name' in frame.data) ? (frame.data as {name?:unknown}).name : undefined;
-    if (typeof receivedName === 'string' && receivedName.toLowerCase() !== name.toLowerCase()) return null;
-    const result=parseRoomHistoryResponse(frame,name);if(!result)return null;
-    if(result.status==='error')throw new Error(result.message);
-    return {room:result.room,messages:result.messages};
-  },options));
+  makeRoomHistoryRequest(name,page); // Kiểm tra số trang trước khi gửi.
+  const frame=await requestChatHistory(name,page,'room',options.timeoutMs??TIMEOUT,options.signal);
+  const result=parseRoomHistoryResponse(frame,name);
+  if(!result) throw new Error('Máy chủ trả dữ liệu lịch sử nhóm không đúng định dạng.');
+  if(result.status==='error') throw new Error(result.message);
+  return {room:result.room,messages:result.messages};
 }
 export async function sendRoomMessage(rawName:string,content:string,options:Options={}):Promise<ChatMessage>{
   const name=normalizeRoomName(rawName);
   const payload=makeRoomMessageRequest(name,content).data.data;
-  return serialize('SEND_CHAT',()=>request('SEND_CHAT',payload,frame=>{
+  return enqueueChatSend(()=>serialize('SEND_CHAT',()=>request('SEND_CHAT',payload,frame=>{
     const result=parseRoomSendResponse(frame,name,content);
     if(!result)return null;
     if(result.status==='error')throw new Error(result.message);
     return result.message;
-  },options));
+  },options)));
 }

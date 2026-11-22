@@ -32,14 +32,6 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
     const [callMode, setCallMode] = useState<"voice" | "video" | null>(null)
 
     useEffect(() => {
-        setReplyTo(null)
-        setLeaveConfirm(false)
-        setDetailOpen(false)
-        setMembers([])
-        setRoomError('')
-    }, [chat?.id])
-
-    useEffect(() => {
         if (!chat) return
         void dispatch(chat.kind === 'group' ? fetchRoomChatHistory({username:chat.name,chatId:chat.id,page:1}) : fetchPeopleChatHistory({username: chat.name, chatId: chat.id, page: 1}))
     }, [chat?.id, chat?.kind, chat?.name, dispatch])
@@ -179,6 +171,7 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
             </div>}
 
             <MessageList
+                key={`${currentUserId}:${chat.id}`}
                 chatId={chat.id}
                 currentUserId={currentUserId}
                 username={chat.name}
@@ -187,6 +180,7 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
             />
 
             <MessageInput
+                key={`${currentUserId}:${chat.id}`}
                 chatId={chat.id}
                 currentUserId={currentUserId}
                 isGroup={chat.kind === 'group'}

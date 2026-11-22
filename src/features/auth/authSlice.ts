@@ -2,7 +2,6 @@ import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 
 type AuthState = {
   userId: string | null;
-  reLoginCode: string | null;
   isAuthenticated: boolean;
   loading: boolean;
   error: string | null;
@@ -10,7 +9,6 @@ type AuthState = {
 
 const initialState: AuthState = {
   userId: null,
-  reLoginCode: null,
   isAuthenticated: false,
   loading: false,
   error: null,
@@ -25,18 +23,16 @@ const authSlice = createSlice({
       state.error = null;
     },
 
+    // Reducer chỉ lưu thông tin hiển thị, KHÔNG lưu RE_LOGIN_CODE vào Redux hoặc localStorage.
     setCredentials: (
         state,
-        action: PayloadAction<{ userId: string; reLoginCode: string }>
+        action: PayloadAction<{ userId: string }>
     ) => {
       state.userId = action.payload.userId;
-      state.reLoginCode = action.payload.reLoginCode;
       state.isAuthenticated = true;
       state.loading = false;
       state.error = null;
 
-      localStorage.setItem("userId", action.payload.userId);
-      localStorage.setItem("reLoginCode", action.payload.reLoginCode);
     },
 
     setAuthError: (state, action: PayloadAction<string>) => {
@@ -48,11 +44,7 @@ const authSlice = createSlice({
       state.error = null;
     },
 
-    clearCredentials: () => {
-      localStorage.removeItem("userId");
-      localStorage.removeItem("reLoginCode");
-      return initialState;
-    },
+    clearCredentials: () => initialState,
   },
 });
 

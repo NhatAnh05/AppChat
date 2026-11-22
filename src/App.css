@@ -796,3 +796,49 @@
   cursor: pointer;
 }
 .directory-group-open:hover { background: #d8eee3; }
+
+/* Giai đoạn 2: công cụ nhắn tin. Mọi thông tin lưu cục bộ được phân biệt theo tài khoản. */
+.lyra-workspace-toolbar {position:sticky;top:-20px;z-index:6;margin:-20px -20px 16px;padding:12px 18px 10px;background:#f7fafb;border-bottom:1px solid #dde7e9;box-shadow:0 2px 5px #00000008;display:grid;gap:8px;}
+.lyra-workspace-tabs {display:flex;gap:7px;flex-wrap:wrap;}
+.lyra-workspace-tabs button,.lyra-workspace-selection button {border:1px solid #d6e5e0;background:#fff;color:#37594f;border-radius:9px;cursor:pointer;font-size:12px;font-weight:600;padding:8px 10px;display:inline-flex;align-items:center;gap:6px;}
+.lyra-workspace-tabs button:hover,.lyra-workspace-tabs button.is-active {color:#155c4c;background:#e5f3ed;border-color:#83baa5;}
+.lyra-workspace-search {height:36px;display:flex;align-items:center;gap:9px;background:#fff;border:1px solid #d7e4e1;border-radius:9px;padding:0 10px;color:#68827a;}
+.lyra-workspace-search:focus-within {border-color:#5ca28f;box-shadow:0 0 0 2px #59a38e22;}
+.lyra-workspace-search input {border:0;outline:0;background:transparent;flex:1;min-width:0;color:#1e293b;font-size:12px;}
+.lyra-workspace-search button {border:0;background:transparent;cursor:pointer;font-size:18px;color:#789;}
+.lyra-workspace-toolbar>small {font-size:10px;color:#718585;}
+.lyra-workspace-media-filter {font-size:12px;font-weight:600;color:#48675b;display:flex;align-items:center;gap:12px;}
+.lyra-workspace-media-filter select,.lyra-workspace-forward-dialog select {border:1px solid #cbd9d5;border-radius:8px;background:#fff;color:#243e35;padding:8px 10px;font-size:12px;}
+.lyra-workspace-feedback {border:1px solid #b9ddcc;background:#e8f6ef;color:#255743;padding:10px 12px;border-radius:9px;margin-bottom:9px;display:flex;justify-content:space-between;font-size:12px;}
+.lyra-workspace-feedback button {border:0;background:transparent;cursor:pointer;color:inherit;}
+.lyra-workspace-selection {display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-bottom:9px;padding:9px 11px;border:1px solid #d5e6df;background:#eef8f3;border-radius:9px;font-size:12px;color:#285747;}
+.lyra-workspace-selection span {font-weight:700;}
+.lyra-workspace-selection button:disabled {opacity:.5;cursor:not-allowed;}
+.lyra-workspace-checkbox {align-self:center;flex:none;margin:10px 12px;accent-color:#278265;width:17px;height:17px;}
+.lyra-selected-message {background:#e2f5e9;border-radius:8px;padding:5px;}
+.lyra-search-hit .message-bubble {box-shadow:0 0 0 2px #e4b95d77;}
+.lyra-message-actions>button {width:29px;height:29px;}
+.lyra-workspace-gallery {display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin:6px 0 20px;}
+.lyra-workspace-media-card {min-width:0;border:1px solid #dae5e1;border-radius:12px;background:#fff;padding:10px;display:flex;flex-direction:column;gap:7px;}
+.lyra-workspace-media-card>img {width:100%;height:116px;object-fit:cover;border-radius:8px;}
+.lyra-workspace-media-card>i {display:grid;place-items:center;font-size:50px;height:116px;color:#567b6c;background:#eaf3ef;border-radius:8px;}
+.lyra-workspace-media-card strong {font-size:12px;color:#26443a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lyra-workspace-media-card small {font-size:11px;color:#6e817c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lyra-workspace-media-card>div {display:flex;gap:8px;margin-top:auto;}
+.lyra-workspace-media-card button,.lyra-workspace-media-card a {background:#eaf5ef;color:#28604b;border:0;border-radius:6px;font-size:11px;padding:6px;text-decoration:none;cursor:pointer;}
+.lyra-workspace-forward-dialog {width:min(460px,calc(100vw - 32px));padding:22px;border-radius:16px;background:#fff;color:#263e36;box-shadow:0 18px 56px #0002;}
+.lyra-workspace-forward-dialog h3 {font-size:18px;margin:0 0 8px;}
+.lyra-workspace-forward-dialog p,.lyra-workspace-forward-dialog small {color:#6c8077;font-size:12px;line-height:1.6;}
+.lyra-workspace-forward-dialog label {display:grid;gap:7px;margin:18px 0;font-size:12px;font-weight:700;}
+.lyra-workspace-forward-actions {display:flex;justify-content:flex-end;gap:10px;margin-top:18px;}
+.lyra-workspace-forward-actions button {border:1px solid #cadbd3;background:#f8fbf8;color:#285747;border-radius:8px;padding:10px 14px;cursor:pointer;}
+.lyra-workspace-forward-actions button:last-child {background:#276d55;color:#fff;border-color:#276d55;}
+.lyra-workspace-forward-actions button:disabled {opacity:.5;cursor:not-allowed;}
+.theme-dark .lyra-workspace-toolbar {background:#111827;border-color:#334155;}
+.theme-dark .lyra-workspace-toolbar>small,.theme-dark .lyra-workspace-media-filter {color:#a9c0b3;}
+.theme-dark .lyra-workspace-tabs button,.theme-dark .lyra-workspace-selection button,.theme-dark .lyra-workspace-search,.theme-dark .lyra-workspace-media-card,.theme-dark .lyra-workspace-forward-dialog {background:#1e293b;border-color:#3c4c59;color:#e2eee8;}
+.theme-dark .lyra-workspace-search input,.theme-dark .lyra-workspace-media-filter select,.theme-dark .lyra-workspace-forward-dialog select {color:#f0f5f2;background:#1e293b;}
+.theme-dark .lyra-workspace-tabs button.is-active,.theme-dark .lyra-workspace-selection,.theme-dark .lyra-selected-message,.theme-dark .lyra-workspace-feedback {background:#1a3c32;border-color:#3b6956;color:#c1ebd2;}
+.theme-dark .lyra-workspace-media-card strong {color:#d0e4da;}
+.theme-dark .lyra-workspace-media-card small,.theme-dark .lyra-workspace-forward-dialog p {color:#a0b4aa;}
+@media(max-width:650px) {.lyra-workspace-toolbar {padding:10px;}.lyra-workspace-tabs button {font-size:11px;padding:7px;}.lyra-workspace-gallery {grid-template-columns:repeat(2,minmax(0,1fr));}}

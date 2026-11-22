@@ -14,7 +14,7 @@ export function AuthInitializer({children}: {children: ReactNode}) {
         let cancelled = false;
         void restoreLoginSession().then(session => {
             if (cancelled) return;
-            if (session) dispatch(setCredentials({userId:session.username,reLoginCode:session.reLoginCode}));
+            if (session) dispatch(setCredentials({userId:session.username}));
             else dispatch(clearCredentials());
         }).catch(() => { if (!cancelled) dispatch(clearCredentials()); })
             .finally(() => { if (!cancelled) setInitialized(true); });

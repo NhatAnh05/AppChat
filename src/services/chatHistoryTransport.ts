@@ -5,9 +5,10 @@
  */
 import { ensureLoginConnection } from './loginService.ts';
 import { websocketService, type WebSocketMessage } from './websocket.ts';
+import { CHAT_HISTORY_EVENT, ROOM_HISTORY_ERROR_EVENT } from './chatApiEvents.ts';
 
-export const HISTORY_EVENT = 'CHAT_PEOPLE_GET_MES';
-const ROOM_ERROR_EVENT = 'GET_ROOM_CHAT_MES';
+export const HISTORY_EVENT = CHAT_HISTORY_EVENT;
+const ROOM_ERROR_EVENT = ROOM_HISTORY_ERROR_EVENT;
 type HistoryKind = 'people' | 'room';
 let queue: Promise<void> = Promise.resolve();
 
@@ -21,9 +22,13 @@ export function historyResponseMatches(message: WebSocketMessage, kind: HistoryK
   return typeof room.name === 'string' && room.name.toLowerCase() === name.toLowerCase() && Array.isArray(room.chatMess);
 }
 
-export function requestChatHistory(name: string, page: number, kind: HistoryKind, timeoutMs = 10_000): Promise<WebSocketMessage> {
+export function requestChatHistory(name: string, page: number, kind: HistoryKind, timeoutMs = 10_000, signal?: AbortSignal): Promise<WebSocketMessage> {
+  if (!name.trim() || !Number.isInteger(page) || page < 1) return Promise.reject(new Error('Yêu cầu lịch sử không hợp lệ.'));
+  if (signal?.aborted) return Promise.reject(new Error('Đã hủy tải lịch sử.'));
   const run = queue.catch(() => undefined).then(async () => {
+    if (signal?.aborted) throw new Error('Đã hủy tải lịch sử.');
     await ensureLoginConnection();
+    if (signal?.aborted) throw new Error('Đã hủy tải lịch sử.');
     return new Promise<WebSocketMessage>((resolve, reject) => {
       const socket = websocketService.getSocket();
       let settled = false;
@@ -35,6 +40,7 @@ export function requestChatHistory(name: string, page: number, kind: HistoryKind
         settled = true;
         clearTimeout(timer);
         offMain(); offError(); offStatus();
+        signal?.removeEventListener('abort', onAbort);
         if (error) reject(error); else if (frame) resolve(frame);
       };
       const receive = (frame: WebSocketMessage) => {
@@ -44,12 +50,15 @@ export function requestChatHistory(name: string, page: number, kind: HistoryKind
         }
         if (historyResponseMatches(frame, kind, name)) finish(undefined, frame);
       };
+      const onAbort = () => finish(new Error('Đã hủy tải lịch sử.'));
       const timer = setTimeout(() => finish(new Error('Máy chủ chưa phản hồi lịch sử tin nhắn.')), timeoutMs);
+      signal?.addEventListener('abort', onAbort, { once: true });
       offMain = websocketService.on(HISTORY_EVENT, receive);
       offError = websocketService.on(ROOM_ERROR_EVENT, receive);
       offStatus = websocketService.onStatus(status => {
         if (status === 'ERROR' || status === 'DISCONNECTED') finish(new Error('Mất kết nối khi tải lịch sử.'));
       });
+      if (signal?.aborted) { onAbort(); return; }
       try { websocketService.send(HISTORY_EVENT, { name, page }); }
       catch (error) { finish(error instanceof Error ? error : new Error('Không gửi được yêu cầu lịch sử.')); }
     });

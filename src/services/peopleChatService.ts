@@ -1,7 +1,9 @@
-import type { ChatMessage } from "../types/chat";
-import { websocketService, type WebSocketMessage } from "./websocket";
+import type { ChatMessage } from "../types/chat.ts";
+import { websocketService, type WebSocketMessage } from "./websocket.ts";
 import { ensureLoginConnection } from "./loginService.ts";
-import { encodeChatContent, decodeChatContent } from "./chatContentCodec";
+import { encodeChatContent, decodeChatContent } from "./chatContentCodec.ts";
+import { requestChatHistory } from "./chatHistoryTransport.ts";
+import { enqueueChatSend } from "./chatSendQueue.ts";
 
 type ApiPeopleMessage = {
   id: string | number;
@@ -21,7 +23,6 @@ type ApiSentPeopleMessage = {
   type?: number | string;
 };
 
-let historyRequestQueue: Promise<void> = Promise.resolve();
 let sendRequestQueue: Promise<void> = Promise.resolve();
 const RESPONSE_TIMEOUT_MS = 10_000;
 
@@ -68,41 +69,13 @@ function validateMessages(data: unknown): ApiPeopleMessage[] {
 }
 
 function requestHistory(username: string, page: number): Promise<WebSocketMessage> {
-  const request = historyRequestQueue.then(() => new Promise<WebSocketMessage>((resolve, reject) => {
-    let unsubscribe = () => {};
-    let settled = false;
-
-    const cleanup = () => {
-      if (settled) return;
-      settled = true;
-      unsubscribe();
-      window.clearTimeout(timeout);
-    };
-
-    unsubscribe = websocketService.on("GET_PEOPLE_CHAT_MES", (message) => {
-      cleanup();
-      resolve(message);
-    });
-
-    const timeout = window.setTimeout(() => {
-      cleanup();
-      reject(new Error("Máy chủ chưa phản hồi."));
-    }, RESPONSE_TIMEOUT_MS);
-
-    try {
-      websocketService.send("GET_PEOPLE_CHAT_MES", { name: username, page });
-    } catch (error) {
-      cleanup();
-      reject(error);
-    }
-  }));
-
-  historyRequestQueue = request.then(() => undefined, () => undefined);
-  return request;
+  // Theo API giảng viên, người và phòng dùng chung CHAT_PEOPLE_GET_MES.
+  // Hàng đợi chung ngăn phản hồi của nhóm bị gán nhầm cho chat cá nhân.
+  return requestChatHistory(username,page,'people',RESPONSE_TIMEOUT_MS);
 }
 
-function requestSendMessage(recipient: string, content: string): Promise<WebSocketMessage> {
-  const request = sendRequestQueue.then(() => new Promise<WebSocketMessage>((resolve, reject) => {
+function requestSendMessage(sender: string, recipient: string, content: string): Promise<WebSocketMessage> {
+  const request = sendRequestQueue.catch(() => undefined).then(() => new Promise<WebSocketMessage>((resolve, reject) => {
     let unsubscribeMessage = () => {};
     let unsubscribeStatus = () => {};
     let settled = false;
@@ -121,23 +94,19 @@ function requestSendMessage(recipient: string, content: string): Promise<WebSock
 
     unsubscribeMessage = websocketService.on("SEND_CHAT", (message) => {
       const data = message.data as Partial<ApiSentPeopleMessage> | null;
-      // Group SEND_CHAT broadcasts share the event name; never accept them as 1:1 receipts.
+      // SEND_CHAT dùng chung cho chat nhóm và chat cá nhân. Không xác nhận từ
+      // một broadcast nhóm, tin của người khác hoặc một ACK success chung chung.
       if (data?.type === 1 || data?.type === 'room') return;
-      if (data?.to && data.to.toLowerCase() !== recipient.toLowerCase()) return;
-      if (data?.mes && data.mes !== content) return;
-
       if (message.status === "error") {
         cleanup();
         reject(new Error(message.mes ?? "Gửi tin nhắn thất bại."));
         return;
       }
-
-      // A generic SEND_CHAT success might concern a different message.
-      // Only confirm an identified payload, or an acknowledgement without
-      // payload when the send queue has exactly one in-flight request.
-      const matchesRequest = message.status === "success" || (data?.to && data?.mes === content);
-      if (!matchesRequest) return;
-
+      if (message.status !== "success") return;
+      if (!data || typeof data.to !== 'string' || typeof data.mes !== 'string') return;
+      if (data.to.trim().toLowerCase() !== recipient.trim().toLowerCase()) return;
+      if (data.mes !== content) return;
+      if (typeof data.name === 'string' && data.name.trim().toLowerCase() !== sender.trim().toLowerCase()) return;
       cleanup();
       resolve(message);
     });
@@ -201,7 +170,7 @@ export const peopleChatService = {
 
     let response: WebSocketMessage;
     try {
-      response = await requestSendMessage(recipient, transportContent);
+      response = await enqueueChatSend(() => requestSendMessage(sender, recipient, transportContent));
     } catch (error) {
       if (!(error instanceof SendConfirmationMissingError)) throw error;
 
@@ -225,7 +194,7 @@ export const peopleChatService = {
           );
           if (confirmedMessage) return confirmedMessage;
         }
-        throw new Error("Máy chủ chưa xác nhận hoặc chưa lưu tin nhắn chứa emoji. Chữ thường gửi được nhưng nội dung mã hóa chưa được server phản hồi. Hãy mở Nhật ký API để kiểm tra SEND_CHAT và GET_PEOPLE_CHAT_MES; không gửi lại liên tục để tránh trùng tin.", { cause: error });
+        throw new Error("Máy chủ chưa xác nhận hoặc chưa lưu tin nhắn chứa emoji. Chữ thường gửi được nhưng nội dung mã hóa chưa được server phản hồi. Hãy mở Nhật ký API để kiểm tra SEND_CHAT và CHAT_PEOPLE_GET_MES; không gửi lại liên tục để tránh trùng tin.", { cause: error });
       } catch (historyError) {
         throw historyError instanceof Error ? historyError : new Error("Không xác minh được trạng thái gửi tin.");
       }

@@ -284,7 +284,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     }, [currentUserId, connectionStatus, contactsInitialized, selectedChat?.id, selectedChat?.kind, dispatch, store]);
 
     // Không tải lịch sử của toàn bộ danh bạ khi đăng nhập.
-    // GET_PEOPLE_CHAT_MES không có request ID nên các yêu cầu phải tuần tự;
+    // CHAT_PEOPLE_GET_MES không có request ID nên các yêu cầu phải tuần tự;
     // tải hàng loạt sẽ chặn cuộc trò chuyện đang được người dùng mở.
     // ChatWindow tải trang đầu khi người dùng chọn một cuộc trò chuyện.
 
@@ -320,7 +320,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             // Lấy danh sách Redux mới nhất, tránh sử dụng friends từ closure cũ.
             const currentFriends = store.getState().contacts.friends;
 
-            const mergedFriends = serverFriends.map(friend => ({
+            const mergedFriends: ContactEntry[] = serverFriends.map(friend => ({
                 ...friend,
                 online: currentFriends.find(existing => existing.id.toLowerCase() === friend.id.toLowerCase())?.online,
             }));
@@ -479,7 +479,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                 // Keep contacts discovered through incoming WebSocket frames while
                 // GET_USER_LIST is in flight, so their unread badges remain reachable.
                 const latestFriends = store.getState().contacts.friends;
-                const mergedFriends = friends.map(friend => ({
+                const mergedFriends: ContactEntry[] = friends.map(friend => ({
                     ...friend,
                     online: latestFriends.find(existing => existing.id.toLowerCase() === friend.id.toLowerCase())?.online,
                 }));
@@ -664,7 +664,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                             : activeSection === "Thư mục" && !selectedChat ? <div className="feature-placeholder"><i className="bi bi-folder2-open"/><h2>Thư mục đã lưu</h2><p>Mở cuộc trò chuyện ở mục Tin nhắn và bấm “Lưu vào thư mục” để đánh dấu ngay trên trình duyệt này.</p></div>
                                 : <>
 
-                                    <ChatWindow chat={currentChat} currentUserId={currentUserId} onMessageSent={refreshUserList}
+                                    <ChatWindow key={`${currentUserId}:${currentChat?.id ?? 'empty'}`} chat={currentChat} currentUserId={currentUserId} onMessageSent={refreshUserList}
                                                 presenceError={presenceError} presenceChecking={presenceChecking}
                                                 onCheckPresence={checkSelectedPresence}
                                                 onRoomLeft={onGroupLeft}/>
@@ -714,8 +714,8 @@ function AppRoutes() {
 
     const isAuthenticated = useSelector((state: RootState) => state.auth.isAuthenticated);
 
-    const handleLogin = (userId: string, reLoginCode: string) => {
-        dispatch(setCredentials({ userId, reLoginCode }));
+    const handleLogin = (userId: string) => {
+        dispatch(setCredentials({ userId }));
         navigate("/chat", { replace: true });
     };
 

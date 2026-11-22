@@ -8,6 +8,7 @@ import { uploadMedia } from "../services/mediaUpload";
 import { encodeMediaMessage, type LyraMediaKind } from "../services/mediaMessage";
 import { makeReply, type ReplyReference } from "../services/messageInteractions";
 import type { AppDispatch, RootState } from "../store/store";
+import { readDraft, saveDraft } from "../services/conversationStorage.ts";
 
 type MessageInputProps = {
   chatId: string;
@@ -19,7 +20,9 @@ type MessageInputProps = {
 };
 
 export default function MessageInput({ chatId, currentUserId, onMessageSent, isGroup = false, replyTo, onCancelReply }: MessageInputProps) {
-  const [content, setContent] = useState("");
+  const [content, setContent] = useState(() => readDraft(currentUserId, chatId));
+  // Tự động lưu bản nháp theo tài khoản/hội thoại ngay khi nội dung thay đổi.
+  useEffect(() => saveDraft(currentUserId, chatId, content), [currentUserId, chatId, content]);
   const [sending, setSending] = useState(false);
   const sendingGroupRef = useRef(false);
   const [uploading, setUploading] = useState(false);
@@ -138,7 +141,7 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
   };
 
   const handleMediaFile = async (file?: File) => {
-    if (!file) return;
+    if (!file || uploading) return;
     setUploading(true);
     try {
       const media = await uploadMedia(file, selectedKind.current);
@@ -148,8 +151,26 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
     } finally { setUploading(false); }
   };
 
+  const kindFromFile = (file: File): LyraMediaKind => file.type === 'image/gif' ? 'gif' :
+    file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : 'file';
+  const pasteMedia = (event: React.ClipboardEvent<HTMLInputElement>) => {
+    const file = event.clipboardData.files.item(0);
+    if (!file) return; // Giữ nguyên thao tác dán văn bản thông thường.
+    event.preventDefault();
+    selectedKind.current = kindFromFile(file);
+    void handleMediaFile(file);
+  };
+  const dropMedia = (event: React.DragEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const file = event.dataTransfer.files[0];
+    if (!file) return;
+    selectedKind.current = kindFromFile(file);
+    void handleMediaFile(file);
+  };
+
   return (
-      <form className={`message-input-container ${replyTo ? "has-reply" : ""}`} onSubmit={handleSubmit}>
+      <form className={`message-input-container ${replyTo ? "has-reply" : ""}`} onSubmit={handleSubmit}
+        onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={dropMedia}>
         {replyTo && <div className="lyra-reply-composer" aria-label="Đang trả lời tin nhắn">
           <i className="bi bi-reply" aria-hidden="true" />
           <div><strong>Trả lời {replyTo.sender}</strong><span>{replyTo.excerpt}</span></div>
@@ -207,6 +228,7 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
             placeholder={"Nhập tin nhắn..."}
             value={content}
             onChange={(event) => setContent(event.target.value)}
+            onPaste={pasteMedia}
             aria-label={"Nội dung tin nhắn"}
         />
         <button className="send-button" type="submit" disabled={!content.trim() || uploading || sending}>

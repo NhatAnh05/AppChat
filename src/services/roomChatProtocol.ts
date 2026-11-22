@@ -3,6 +3,7 @@ import { decodeChatContent, encodeChatContent } from './chatContentCodec.ts';
 import type { ChatMessage } from '../types/chat.ts';
 import { normalizeRoomName, type CreatedRoom, type CreatedRoomMember, parseCreateRoomResponse } from './createRoomProtocol.ts';
 import { parseServerChatMessage } from './serverMessage.ts';
+import { CHAT_HISTORY_EVENT, ROOM_HISTORY_ERROR_EVENT } from './chatApiEvents.ts';
 
 export { normalizeRoomName };
 /** Local-only namespace; transport requests continue using the raw server room name. */
@@ -17,7 +18,7 @@ export function makeRoomRequest(event:'JOIN_ROOM'|'OUT_ROOM', name:string) {
 }
 export function makeRoomHistoryRequest(name:string, page:number) {
   if (!Number.isInteger(page) || page < 1) throw new Error('Trang lịch sử phải là số nguyên dương.');
-  return {action:'onchat', data:{event:'GET_ROOM_CHAT_MES', data:{name:normalizeRoomName(name),page}}};
+  return {action:'onchat', data:{event:CHAT_HISTORY_EVENT, data:{name:normalizeRoomName(name),page}}};
 }
 export function makeRoomMessageRequest(name:string, content:string) {
   if (!content.trim()) throw new Error('Nhập nội dung tin nhắn nhóm.');
@@ -69,7 +70,9 @@ export function mapRoomMessage(value:unknown, roomName:string):ChatMessage|null 
 export function parseRoomHistoryResponse(input:unknown, name:string):
   | {status:'success';room:RoomDetails;messages:ChatMessage[]}
   | {status:'error';message:string} | null {
-  const frame=parseFrame(input,'GET_ROOM_CHAT_MES');if(!frame)return null;
+  // Tài liệu: phản hồi thành công là CHAT_PEOPLE_GET_MES; lỗi phòng có thể là GET_ROOM_CHAT_MES.
+  const frame=parseFrame(input,CHAT_HISTORY_EVENT) ?? parseFrame(input,ROOM_HISTORY_ERROR_EVENT);
+  if(!frame || (frame.event === ROOM_HISTORY_ERROR_EVENT && frame.status !== 'error'))return null;
   if(frame.status==='error')return {status:'error',message:typeof frame.mes==='string'?frame.mes:'Không tải được lịch sử nhóm.'};
   if(frame.status!=='success')return {status:'error',message:'Máy chủ chưa xác nhận lịch sử nhóm.'};
   const room=parseRoom(frame.data);

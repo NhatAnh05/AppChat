@@ -12,10 +12,17 @@ type MessageItemProps = {
   onReaction?: (emoji: string) => void;
   onReply?: () => void;
   onJumpReply?: (id: string) => void;
+  bookmarked?: boolean;
+  onBookmark?: () => void;
+  onForward?: () => void;
+  selecting?: boolean;
+  selected?: boolean;
+  onSelect?: () => void;
+  highlighted?: boolean;
 };
 
 const REACTIONS = ["❤️", "😂", "😮", "😢", "😡", "👍"];
-export default function MessageItem({ message, currentUserId, reactions = [], currentReactions = [], onReaction, onReply, onJumpReply }: MessageItemProps) {
+export default function MessageItem({ message, currentUserId, reactions = [], currentReactions = [], onReaction, onReply, onJumpReply, bookmarked = false, onBookmark, onForward, selecting = false, selected = false, onSelect, highlighted = false }: MessageItemProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const interaction = parseInteraction(message.content);
   const reply = interaction?.kind === "reply" ? interaction.reply : null;
@@ -27,7 +34,8 @@ export default function MessageItem({ message, currentUserId, reactions = [], cu
   const recipient = message.recipientName ? ` đến ${message.recipientName}` : "";
 
   return (
-    <div id={`lyra-message-${message.id}`} className={`message-row ${isSent ? "sent" : "received"}`} title={`Từ ${senderName}${recipient}`}>
+    <div id={`lyra-message-${message.id}`} className={`message-row ${isSent ? "sent" : "received"} ${selected ? "lyra-selected-message" : ""} ${highlighted ? "lyra-search-hit" : ""}`} title={`Từ ${senderName}${recipient}`}>
+      {selecting && <input type="checkbox" className="lyra-workspace-checkbox" aria-label={`Chọn tin nhắn của ${senderName}`} checked={selected} onChange={onSelect} />}
       <div className="message-content-wrap">
         <div className="message-meta">
           <strong className="message-sender-name">{senderName}</strong>
@@ -51,6 +59,8 @@ export default function MessageItem({ message, currentUserId, reactions = [], cu
           </div>
           <div className="lyra-message-actions">
             <button type="button" onClick={onReply} title="Trả lời tin nhắn" aria-label="Trả lời tin nhắn"><i className="bi bi-reply" /></button>
+            <button type="button" onClick={onBookmark} title={bookmarked ? "Bỏ lưu tin nhắn" : "Lưu tin nhắn"} aria-label={bookmarked ? "Bỏ lưu tin nhắn" : "Lưu tin nhắn"}><i className={`bi bi-${bookmarked ? "bookmark-fill" : "bookmark"}`} /></button>
+            <button type="button" onClick={onForward} title="Chuyển tiếp tin nhắn" aria-label="Chuyển tiếp tin nhắn"><i className="bi bi-forward" /></button>
             <div className="lyra-react-anchor">
               <button type="button" onClick={() => setPickerOpen(v => !v)} title="Thả cảm xúc" aria-label="Thả cảm xúc"><i className="bi bi-emoji-smile" /></button>
               {pickerOpen && <div className="lyra-react-picker" role="group" aria-label="Chọn cảm xúc">
