@@ -2,6 +2,8 @@ import { type FormEvent, useState, useEffect, useRef } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { addMessage, removeMessage, replaceMessage } from "../features/messages/messagesSlice";
 import { peopleChatService } from "../services/peopleChatService";
+import { sendRoomMessage } from "../services/roomChatService.ts";
+import { roomNameFromChatId } from "../services/roomChatProtocol.ts";
 import { uploadMedia } from "../services/mediaUpload";
 import { encodeMediaMessage, type LyraMediaKind } from "../services/mediaMessage";
 import type { AppDispatch, RootState } from "../store/store";
@@ -10,10 +12,13 @@ type MessageInputProps = {
   chatId: string;
   currentUserId: string;
   onMessageSent?: () => void;
+  isGroup?: boolean;
 };
 
-export default function MessageInput({ chatId, currentUserId, onMessageSent }: MessageInputProps) {
+export default function MessageInput({ chatId, currentUserId, onMessageSent, isGroup = false }: MessageInputProps) {
   const [content, setContent] = useState("");
+  const [sending, setSending] = useState(false);
+  const sendingGroupRef = useRef(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedKind = useRef<LyraMediaKind>("file");
@@ -75,6 +80,21 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent }: M
   const sendContent = async (value: string, clearInput = false) => {
     const trimmedContent = value.trim();
     if (!trimmedContent) return;
+    if (isGroup) {
+      if (sendingGroupRef.current) return;
+      sendingGroupRef.current = true;
+      setSending(true);
+      if (clearInput) setContent('');
+      try {
+        const confirmed = await sendRoomMessage(roomNameFromChatId(chatId), trimmedContent);
+        dispatch(addMessage({...confirmed, orderAt:new Date().toISOString()}));
+        onMessageSent?.();
+      } catch (error) {
+        if (clearInput) setContent(previous => previous || trimmedContent);
+        throw error;
+      } finally { sendingGroupRef.current = false; setSending(false); }
+      return;
+    }
     const knownMessageIds = messages.filter(m => m.chatId === chatId).map(m => m.id);
     const sentAt = new Date().toISOString();
     const optimisticId = crypto.randomUUID();
@@ -124,64 +144,64 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent }: M
   };
 
   return (
-    <form className="message-input-container" onSubmit={handleSubmit}>
-      <input ref={fileInputRef} type="file" hidden onChange={e => void handleMediaFile(e.target.files?.[0])} />
-      <div className="media-attach-anchor" ref={mediaMenuRef}>
-        <button
-          type="button"
-          className="media-plus-toggle"
-          title="Đính kèm ảnh, video, GIF hoặc tệp"
-          aria-label="Thêm nội dung đính kèm"
-          aria-haspopup="menu"
-          aria-expanded={mediaMenuOpen}
-          disabled={uploading}
-          onClick={() => { setEmojiOpen(false); setMediaMenuOpen(open => !open); }}
-        >
-          <i className={`bi ${mediaMenuOpen ? "bi-x-lg" : "bi-plus-lg"}`} aria-hidden="true" />
+      <form className="message-input-container" onSubmit={handleSubmit}>
+        <input ref={fileInputRef} type="file" hidden onChange={e => void handleMediaFile(e.target.files?.[0])} />
+        <div className="media-attach-anchor" ref={mediaMenuRef}>
+          <button
+              type="button"
+              className="media-plus-toggle"
+              title="Đính kèm ảnh, video, GIF hoặc tệp"
+              aria-label="Thêm nội dung đính kèm"
+              aria-haspopup="menu"
+              aria-expanded={mediaMenuOpen}
+              disabled={uploading}
+              onClick={() => { setEmojiOpen(false); setMediaMenuOpen(open => !open); }}
+          >
+            <i className={`bi ${mediaMenuOpen ? "bi-x-lg" : "bi-plus-lg"}`} aria-hidden="true" />
+          </button>
+          {mediaMenuOpen && (
+              <div className="media-attach-menu" role="menu" aria-label="Chọn loại tệp đính kèm">
+                <button type="button" role="menuitem" onClick={() => chooseMedia("image")}> <i className="bi bi-image" aria-hidden="true" /> <span>Hình ảnh</span> </button>
+                <button type="button" role="menuitem" onClick={() => chooseMedia("video")}> <i className="bi bi-camera-video" aria-hidden="true" /> <span>Video</span> </button>
+                <button type="button" role="menuitem" onClick={() => chooseMedia("gif")}> <i className="bi bi-filetype-gif" aria-hidden="true" /> <span>GIF</span> </button>
+                <button type="button" role="menuitem" onClick={() => chooseMedia("file")}> <i className="bi bi-paperclip" aria-hidden="true" /> <span>Tệp</span> </button>
+              </div>
+          )}
+        </div>
+        <div className="emoji-picker-anchor" ref={emojiPanelRef}>
+          <button
+              type="button"
+              className="emoji-toggle"
+              aria-label="Chọn biểu tượng cảm xúc"
+              title="Gửi emoji"
+              aria-expanded={emojiOpen}
+              onClick={() => setEmojiOpen((open) => !open)}
+          >
+            <i className="bi bi-emoji-smile" aria-hidden="true" />
+          </button>
+          {emojiOpen && (
+              <div className="emoji-picker" role="group" aria-label="Biểu tượng cảm xúc">
+                <div className="emoji-picker-title">Chọn emoji</div>
+                <div className="emoji-picker-grid">
+                  {emojis.map((emoji) => (
+                      <button key={emoji} type="button" className="emoji-choice" title={emoji} onClick={() => insertEmoji(emoji)}>{emoji}</button>
+                  ))}
+                </div>
+              </div>
+          )}
+        </div>
+        <input
+            ref={inputRef}
+            className="message-input"
+            type="text"
+            placeholder={"Nhập tin nhắn..."}
+            value={content}
+            onChange={(event) => setContent(event.target.value)}
+            aria-label={"Nội dung tin nhắn"}
+        />
+        <button className="send-button" type="submit" disabled={!content.trim() || uploading || sending}>
+          {uploading ? "Đang tải..." : sending ? "Đang gửi..." : "Gửi"}
         </button>
-        {mediaMenuOpen && (
-          <div className="media-attach-menu" role="menu" aria-label="Chọn loại tệp đính kèm">
-            <button type="button" role="menuitem" onClick={() => chooseMedia("image")}> <i className="bi bi-image" aria-hidden="true" /> <span>Hình ảnh</span> </button>
-            <button type="button" role="menuitem" onClick={() => chooseMedia("video")}> <i className="bi bi-camera-video" aria-hidden="true" /> <span>Video</span> </button>
-            <button type="button" role="menuitem" onClick={() => chooseMedia("gif")}> <i className="bi bi-filetype-gif" aria-hidden="true" /> <span>GIF</span> </button>
-            <button type="button" role="menuitem" onClick={() => chooseMedia("file")}> <i className="bi bi-paperclip" aria-hidden="true" /> <span>Tệp</span> </button>
-          </div>
-        )}
-      </div>
-      <div className="emoji-picker-anchor" ref={emojiPanelRef}>
-        <button
-          type="button"
-          className="emoji-toggle"
-          aria-label="Chọn biểu tượng cảm xúc"
-          title="Gửi emoji"
-          aria-expanded={emojiOpen}
-          onClick={() => setEmojiOpen((open) => !open)}
-        >
-          <i className="bi bi-emoji-smile" aria-hidden="true" />
-        </button>
-        {emojiOpen && (
-          <div className="emoji-picker" role="group" aria-label="Biểu tượng cảm xúc">
-            <div className="emoji-picker-title">Chọn emoji</div>
-            <div className="emoji-picker-grid">
-              {emojis.map((emoji) => (
-                <button key={emoji} type="button" className="emoji-choice" title={emoji} onClick={() => insertEmoji(emoji)}>{emoji}</button>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-      <input
-        ref={inputRef}
-        className="message-input"
-        type="text"
-        placeholder={"Nhập tin nhắn..."}
-        value={content}
-        onChange={(event) => setContent(event.target.value)}
-        aria-label={"Nội dung tin nhắn"}
-      />
-      <button className="send-button" type="submit" disabled={!content.trim() || uploading}>
-        {uploading ? "Đang tải..." : "Gửi"}
-      </button>
-    </form>
+      </form>
   );
 }

@@ -393,3 +393,42 @@
 .lyra-workspace.theme-dark .lyra-back-to-chat{background:#25363d;border-color:#3e5554;color:#c7e9d9;}.lyra-workspace.theme-dark .lyra-settings-card,.lyra-workspace.theme-dark .lyra-settings-bottom{border-color:#354842;}.lyra-workspace.theme-dark .lyra-appearance-choice.selected{border-color:#66c9a7;background:#22433b;}
 @media(max-width:950px){.lyra-workspace:has(.lyra-settings-page){grid-template-columns:68px minmax(0,1fr)!important;}.lyra-settings-layout{grid-template-columns:1fr;}.lyra-settings-menu{flex-direction:row;flex-wrap:wrap;}.lyra-settings-menu>button{width:auto;flex:1;min-width:150px;}.lyra-settings-menu-footer{margin:0;border:0;padding:0;}.lyra-settings-page{padding:22px;}}
 @media(max-width:580px){.lyra-settings-top{align-items:flex-start;flex-direction:column;}.lyra-settings-page{padding:14px;}.lyra-field-grid,.lyra-appearance-choices{grid-template-columns:1fr;}.lyra-profile-summary{flex-wrap:wrap;padding:0 17px 20px;}.lyra-photo-change{margin:0;}.lyra-profile-fields{padding:20px 17px;}.lyra-settings-bottom{padding:16px;}}
+
+/* Unread count is derived from incoming messages, not from total history length. */
+.sidebar-nav .nav-unread-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  margin-left: auto;
+  border-radius: 999px;
+  color: #fff;
+  background: #269b7f;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+@media (max-width: 900px) {
+  .lyra-workspace .nav-item { position: relative; }
+  .lyra-workspace .nav-item > .nav-unread-badge {
+    display: inline-grid;
+    position: absolute;
+    top: 2px;
+    right: 1px;
+    margin: 0;
+    min-width: 17px;
+    height: 17px;
+    font-size: 9px;
+  }
+}
+
+/* API 6 CREATE_ROOM: small mode selector inside the existing compose dialog. */
+.lyra-compose-tabs {display:flex;gap:7px;margin:5px 0 14px;}
+.lyra-compose-tabs button {flex:1;padding:10px;border-radius:9px;border:1px solid #cadbd3;background:#f7faf9;color:#37665b;font-weight:600;cursor:pointer;}
+.lyra-compose-tabs button.is-active {background:#245d4e;border-color:#245d4e;color:#fff;}
+.lyra-compose-tabs button:disabled {opacity:.6;cursor:wait;}
+.lyra-create-group-action {margin-top:15px;border:0;background:#245d4e;color:white;padding:10px 16px;border-radius:9px;cursor:pointer;font-weight:600;}
+.lyra-create-group-action:hover {background:#184c40;}
+.theme-dark .lyra-compose-tabs button:not(.is-active) {background:#213b35;border-color:#415f55;color:#d9e9e2;}

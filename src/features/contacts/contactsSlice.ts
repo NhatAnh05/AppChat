@@ -27,7 +27,7 @@ const contactsSlice = createSlice({
     },
 
     addFriend: (state, action: PayloadAction<ContactEntry>) => {
-      const exists = state.friends.some(friend => friend.id === action.payload.id);
+      const exists = state.friends.some(friend => friend.id.toLowerCase() === action.payload.id.toLowerCase());
 
       if (!exists) {
         state.friends.push(action.payload);
@@ -68,12 +68,16 @@ const contactsSlice = createSlice({
         action: PayloadAction<{ id: string; online: boolean }>
     ) => {
       const contact = state.friends.find(
-          friend => friend.id === action.payload.id
+          friend => friend.id.toLowerCase() === action.payload.id.toLowerCase()
       );
 
       if (contact) {
         contact.online = action.payload.online;
       }
+    },
+
+    clearOnlineStatuses: state => {
+      state.friends.forEach(friend => { friend.online = undefined; });
     },
 
     setSelectedContact: (
@@ -115,6 +119,7 @@ export const {
   addGroup,
   removeGroup,
   setContactOnline,
+  clearOnlineStatuses,
   setSelectedContact,
   setContactsLoading,
   setContactsError,

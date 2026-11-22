@@ -1,65 +1,54 @@
-import {type WebSocketMessage, websocketService} from "./websocket.ts";
+import { websocketService } from './websocket.ts';
+import { ensureLoginConnection } from './loginService.ts';
 
-export type UserListItem = {
-    name: string;
-    type: 0 | 1;
-    actionTime: string;
-};
+export type UserListItem = {name: string; type: 0 | 1; actionTime: string};
+
+export function parseUserList(payload: unknown): UserListItem[] | null {
+    if (!Array.isArray(payload)) return null;
+    const result: UserListItem[] = [];
+    for (const item of payload) {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+        const row = item as Record<string, unknown>;
+        if (typeof row.name !== 'string' || !row.name.trim() || (row.type !== 0 && row.type !== 1)) return null;
+        result.push({name:row.name.trim(),type:row.type,actionTime:typeof row.actionTime === 'string' ? row.actionTime : ''});
+    }
+    return result;
+}
+
+let pendingList: Promise<UserListItem[]> | null = null;
+async function requestList(): Promise<UserListItem[]> {
+    await ensureLoginConnection();
+    return new Promise<UserListItem[]>((resolve, reject) => {
+        let finished = false;
+        const cleanup = () => { clearTimeout(timeout); offMessage(); offStatus(); };
+        const finish = (error?: Error, data?: UserListItem[]) => {
+            if (finished) return;
+            finished = true; cleanup();
+            if (error) reject(error); else resolve(data ?? []);
+        };
+        const offMessage = websocketService.on('GET_USER_LIST', message => {
+            if (message.status === 'error') { finish(new Error(message.mes || 'GET_USER_LIST bị từ chối.')); return; }
+            const list = parseUserList(message.data);
+            if (!list) { finish(new Error('Dữ liệu GET_USER_LIST không hợp lệ.')); return; }
+            finish(undefined, list);
+        });
+        const offStatus = websocketService.onStatus(status => {
+            if (status === 'DISCONNECTED' || status === 'ERROR') finish(new Error('Mất kết nối khi tải danh bạ.'));
+        });
+        const timeout = setTimeout(() => finish(new Error('Hết thời gian chờ GET_USER_LIST.')), 10000);
+        try { websocketService.send('GET_USER_LIST', {}); }
+        catch(error) { finish(error instanceof Error ? error : new Error('Không thể gửi GET_USER_LIST.')); }
+    });
+}
 
 export const contactService = {
-    // lấy danh sách người dùng và nhóm
     getUserList(): Promise<UserListItem[]> {
-        return new Promise((resolve, reject) => {
-            let unsubscribe = () => {};
-
-            const timeout = setTimeout(() => {
-                unsubscribe();
-                reject(new Error("Hết thời gian chờ GET_USER_LIST"));
-            }, 10000);
-
-            unsubscribe = websocketService.on("GET_USER_LIST",
-                (message: WebSocketMessage) => {
-                    clearTimeout(timeout);
-                    unsubscribe();
-
-                    if (message.status === "error") {
-                        reject(new Error(message.mes || "Không thể lấy danh sách"));
-                        return;
-                    }
-
-                    if (!Array.isArray(message.data)) {
-                        reject(new Error("Dữ liệu GET_USER_LIST không hợp lệ"));
-                        return;
-                    }
-                    resolve(message.data as UserListItem[]);
-                }
-            );
-
-            try {
-                websocketService.send("GET_USER_LIST");
-            } catch (error) {
-                clearTimeout(timeout);
-                unsubscribe();
-                reject(error);
-            }
-        });
+        if (pendingList) return pendingList;
+        const task = requestList();
+        pendingList = task;
+        void task.finally(() => { if (pendingList === task) pendingList = null; }).catch(() => undefined);
+        return task;
     },
-
-    /**
-     * Lấy danh sách người đã trò chuyện.
-     */
-    async getFriends(): Promise<UserListItem[]> {
-        const items = await this.getUserList();
-
-        return items.filter(item => item.type === 0);
-    },
-
-    /**
-     * Lấy danh sách nhóm.
-     */
-    async getGroups(): Promise<UserListItem[]> {
-        const items = await this.getUserList();
-
-        return items.filter(item => item.type === 1);
-    },
+    async getFriends() { return (await this.getUserList()).filter(item => item.type === 0); },
+    async getGroups() { return (await this.getUserList()).filter(item => item.type === 1); },
 };

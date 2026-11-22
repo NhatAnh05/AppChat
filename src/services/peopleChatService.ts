@@ -1,6 +1,6 @@
 import type { ChatMessage } from "../types/chat";
 import { websocketService, type WebSocketMessage } from "./websocket";
-import { authService } from "./authService";
+import { ensureLoginConnection } from "./loginService.ts";
 import { encodeChatContent, decodeChatContent } from "./chatContentCodec";
 
 type ApiPeopleMessage = {
@@ -18,7 +18,7 @@ type ApiSentPeopleMessage = {
   to?: string;
   mes?: string;
   createAt?: string;
-  type?: number;
+  type?: number | string;
 };
 
 let historyRequestQueue: Promise<void> = Promise.resolve();
@@ -28,22 +28,7 @@ const RESPONSE_TIMEOUT_MS = 10_000;
 class SendConfirmationMissingError extends Error {}
 
 async function ensureAuthenticatedConnection(): Promise<void> {
-  const wasConnected = websocketService.getStatus() === "CONNECTED";
-  await websocketService.connect();
-  if (wasConnected) return;
-
-  const userId = localStorage.getItem("userId");
-  const reLoginCode = localStorage.getItem("reLoginCode");
-  if (!userId || !reLoginCode) {
-    throw new Error("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
-  }
-
-  const response = await authService.reLogin(userId, reLoginCode);
-  const nextCode = response.data?.RE_LOGIN_CODE;
-  if (response.status !== "success" || !nextCode) {
-    throw new Error(response.mes ?? "Không thể khôi phục phiên đăng nhập.");
-  }
-  localStorage.setItem("reLoginCode", nextCode);
+  await ensureLoginConnection();
 }
 
 function mapMessage(message: ApiPeopleMessage, chatId: string): ChatMessage {
@@ -68,12 +53,12 @@ function validateMessages(data: unknown): ApiPeopleMessage[] {
 
     const message = item as Partial<ApiPeopleMessage>;
     if (
-      (typeof message.id !== "string" && typeof message.id !== "number") ||
-      typeof message.name !== "string" ||
-      typeof message.to !== "string" ||
-      typeof message.mes !== "string" ||
-      typeof message.createAt !== "string" ||
-      typeof message.type !== "number"
+        (typeof message.id !== "string" && typeof message.id !== "number") ||
+        typeof message.name !== "string" ||
+        typeof message.to !== "string" ||
+        typeof message.mes !== "string" ||
+        typeof message.createAt !== "string" ||
+        typeof message.type !== "number"
     ) {
       throw new Error("Tin nhắn thiếu dữ liệu.");
     }
@@ -136,6 +121,8 @@ function requestSendMessage(recipient: string, content: string): Promise<WebSock
 
     unsubscribeMessage = websocketService.on("SEND_CHAT", (message) => {
       const data = message.data as Partial<ApiSentPeopleMessage> | null;
+      // Group SEND_CHAT broadcasts share the event name; never accept them as 1:1 receipts.
+      if (data?.type === 1 || data?.type === 'room') return;
       if (data?.to && data.to.toLowerCase() !== recipient.toLowerCase()) return;
       if (data?.mes && data.mes !== content) return;
 
@@ -195,10 +182,10 @@ export const peopleChatService = {
   },
 
   async sendMessage(
-    sender: string,
-    recipient: string,
-    content: string,
-    knownMessageIds: string[] = [],
+      sender: string,
+      recipient: string,
+      content: string,
+      knownMessageIds: string[] = [],
   ): Promise<ChatMessage | null> {
     const trimmedContent = content.trim();
     const transportContent = encodeChatContent(trimmedContent);
@@ -228,17 +215,17 @@ export const peopleChatService = {
           const historyResponse = await requestHistory(recipient, 1);
           if (historyResponse.status === "error") continue;
           const recentHistory = validateMessages(historyResponse.data)
-            .slice(0, 50)
-            .map(message => mapMessage(message, recipient));
+              .slice(0, 50)
+              .map(message => mapMessage(message, recipient));
           const confirmedMessage = recentHistory.find(message =>
-            !knownIds.has(message.id) &&
-            message.senderId.toLowerCase() === sender.toLowerCase() &&
-            message.recipientId?.toLowerCase() === recipient.toLowerCase() &&
-            message.content === trimmedContent
+              !knownIds.has(message.id) &&
+              message.senderId.toLowerCase() === sender.toLowerCase() &&
+              message.recipientId?.toLowerCase() === recipient.toLowerCase() &&
+              message.content === trimmedContent
           );
           if (confirmedMessage) return confirmedMessage;
         }
-        throw new Error("Máy chủ chưa xác nhận hoặc chưa lưu tin nhắn chứa emoji. Chữ thường gửi được nhưng nội dung mã hóa chưa được server phản hồi. Hãy mở Nhật ký API để kiểm tra SEND_CHAT và GET_PEOPLE_CHAT_MES; không gửi lại liên tục để tránh trùng tin.");
+        throw new Error("Máy chủ chưa xác nhận hoặc chưa lưu tin nhắn chứa emoji. Chữ thường gửi được nhưng nội dung mã hóa chưa được server phản hồi. Hãy mở Nhật ký API để kiểm tra SEND_CHAT và GET_PEOPLE_CHAT_MES; không gửi lại liên tục để tránh trùng tin.", { cause: error });
       } catch (historyError) {
         throw historyError instanceof Error ? historyError : new Error("Không xác minh được trạng thái gửi tin.");
       }
@@ -264,7 +251,7 @@ export const peopleChatService = {
       content: decodeChatContent(responseData.mes ?? transportContent),
       createdAt: responseData.createAt ?? new Date().toISOString(),
       orderAt,
-      type: responseData.type ?? 0,
+      type: typeof responseData.type === "number" ? responseData.type : 0,
     };
   },
 };

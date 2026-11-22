@@ -1,153 +1,152 @@
+/** Shared transport: REGISTER before login; every other app API uses the authenticated socket. */
 export interface WebSocketMessage<T = unknown> {
     event: string;
-    status?: "success" | "error";
+    status?: 'success' | 'error';
     data: T;
     mes?: string;
 }
-
+export type ApiLogEntry = { at: string; direction: 'GỬI' | 'NHẬN' | 'TRẠNG THÁI'; event: string; status?: string };
+export type WebSocketState = 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
 type MessageCallback = (message: WebSocketMessage) => void;
-export type ApiLogEntry = { at: string; direction: "GỬI" | "NHẬN" | "TRẠNG THÁI"; event: string; status?: string };
 type LogCallback = (entry: ApiLogEntry) => void;
 type StatusCallback = (status: WebSocketState) => void;
 
-export type WebSocketState = | 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
+export const CHAT_WS_URL = (import.meta as ImportMeta & {env?: {VITE_CHAT_WS_URL?: string}}).env?.VITE_CHAT_WS_URL || 'wss://chat.longapp.io.vn/chat/chat';
 
-class WebSocketService {
+export class WebSocketService {
     private socket: WebSocket | null = null;
-    private status: WebSocketState = "DISCONNECTED";
-    private messageListeners = new Map<string, Set<MessageCallback>>();
-    private logListeners = new Set<LogCallback>();
-    private statusListeners = new Set<StatusCallback>();
+    private authenticated = false;
+    private status: WebSocketState = 'DISCONNECTED';
+    private connectPromise: Promise<void> | null = null;
+    private readonly messages = new Map<string, Set<MessageCallback>>();
+    private readonly logs = new Set<LogCallback>();
+    private readonly statuses = new Set<StatusCallback>();
 
-    private readonly url = 'wss://chat.longapp.io.vn/chat/chat';
-    getStatus(): WebSocketState {
-        return this.status;
-    }
+    getStatus(): WebSocketState { return this.status; }
+    getSocket(): WebSocket | null { return this.socket; }
+    isAuthenticated(): boolean { return this.authenticated && this.socket?.readyState === WebSocket.OPEN; }
 
+    /** Only used by registration. Login/RE_LOGIN must authenticate BEFORE calling adopt(). */
     connect(): Promise<void> {
-        if (this.socket?.readyState === WebSocket.OPEN) {
-            return Promise.resolve();
-        }
-
-        if (this.socket?.readyState === WebSocket.CONNECTING) {
-            return new Promise((resolve, reject) => {
-                const unsubscribe = this.onStatus((status) => {
-                    if (status === 'CONNECTED') {
-                        unsubscribe();
-                        resolve();
-                    }
-
-                    if (status === 'ERROR' || status === 'DISCONNECTED') {
-                        unsubscribe();
-                        reject(new Error('Không thể kết nối WebSocket'));
-                    }
-                });
-            });
-        }
-
-        return new Promise((resolve, reject) => {
-            const ws = new WebSocket(this.url);
-            this.socket = ws;
-
-            this.notifyStatus('CONNECTING');
-
-            ws.onopen = () => {
-                this.notifyStatus('CONNECTED');
-                resolve();
+        if (this.socket?.readyState === WebSocket.OPEN) return Promise.resolve();
+        if (this.connectPromise) return this.connectPromise;
+        this.connectPromise = new Promise<void>((resolve, reject) => {
+            let socket: WebSocket;
+            try { socket = new WebSocket(CHAT_WS_URL); }
+            catch (error) { reject(error); return; }
+            this.adopt(socket, false);
+            this.updateStatus('CONNECTING');
+            let settled = false;
+            const finish = (error?: Error) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                this.connectPromise = null;
+                if (error) {
+                    this.release(socket);
+                    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close();
+                    reject(error);
+                } else resolve();
             };
-
-            ws.onmessage = (event: MessageEvent<string>) => {
-                try {
-                    const raw = JSON.parse(event.data);
-
-                    const message = raw?.data?.event ? raw.data : raw;
-
-                    if (typeof message.event !== "string") {
-                        console.warn("WebSocket response không hợp lệ:", raw);
-                        return;
-                    }
-
-                    this.notifyLog({ at: new Date().toLocaleTimeString("vi-VN"), direction: "NHẬN", event: message.event, status: raw.status ?? message.status });
-                    this.notifyMessage({
-                        event: message.event,
-                        status: raw.status ?? message.status,
-                        data: message.data,
-                        mes: raw.mes ?? message.mes,
-                    });
-                } catch (error) {
-                    console.error('Lỗi đọc WebSocket message:', error);
-                }
-            };
-
-            ws.onerror = () => {
-                this.notifyStatus('ERROR');
-                reject(new Error('WebSocket connection error'));
-            };
-
-            ws.onclose = () => {
-                this.notifyStatus('DISCONNECTED');
-                this.socket = null;
-            };
+            const timer = setTimeout(() => {
+                this.release(socket);
+                try { socket.close(); } catch { /* closed already */ }
+                finish(new Error('Kết nối WebSocket quá thời gian chờ.'));
+            }, 10000);
+            const originalOpen = socket.onopen;
+            socket.onopen = ev => { originalOpen?.call(socket, ev); finish(); };
+            const originalError = socket.onerror;
+            socket.onerror = ev => { originalError?.call(socket, ev); finish(new Error('Không thể kết nối WebSocket.')); };
+            const originalClose = socket.onclose;
+            socket.onclose = ev => { originalClose?.call(socket, ev); finish(new Error('WebSocket đã đóng trước khi kết nối.')); };
         });
+        return this.connectPromise;
     }
 
-    send(event: string, data: unknown = {}): void {
-        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-            throw new Error('WebSocket chưa kết nối');
-        }
-
-        const request = {
-            action: 'onchat',
-            data: {
-                event,
-                data,
-            },
+    /** Hand over a backend-authenticated socket from LOGIN/RE_LOGIN. */
+    adopt(socket: WebSocket, authenticated = true): void {
+        if (this.socket && this.socket !== socket) this.disconnect();
+        this.socket = socket;
+        this.authenticated = authenticated;
+        const previousMessage = socket.onmessage;
+        socket.onmessage = ev => {
+            previousMessage?.call(socket, ev);
+            if (this.socket === socket && typeof ev.data === 'string') this.receive(ev.data);
         };
+        const previousClose = socket.onclose;
+        socket.onclose = ev => {
+            if (this.socket === socket) this.release(socket);
+            previousClose?.call(socket, ev);
+        };
+        const previousError = socket.onerror;
+        socket.onerror = ev => {
+            if (this.socket === socket) this.updateStatus('ERROR');
+            previousError?.call(socket, ev);
+        };
+        this.updateStatus(socket.readyState === WebSocket.OPEN ? 'CONNECTED' : 'CONNECTING');
+    }
 
-        this.socket.send(JSON.stringify(request));
-        this.notifyLog({at: new Date().toLocaleTimeString("vi-VN"), direction: "GỬI", event});
+    release(socket: WebSocket): void {
+        if (this.socket !== socket) return;
+        this.socket = null;
+        this.authenticated = false;
+        this.updateStatus('DISCONNECTED');
+    }
+
+    lockAuthenticatedOperations(): void { this.authenticated = false; }
+
+    /** LOGOUT must omit the extra data property. Other events keep the documented envelope. */
+    send(event: string, data?: unknown): void {
+        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) throw new Error('WebSocket chưa kết nối.');
+        if (!this.authenticated && event !== 'REGISTER') throw new Error('Cần đăng nhập trước khi gọi API.');
+        const payload = event === 'LOGOUT'
+            ? { action: 'onchat', data: { event: 'LOGOUT' } }
+            : { action: 'onchat', data: { event, data: data ?? {} } };
+        this.socket.send(JSON.stringify(payload));
+        this.log({ at: new Date().toLocaleTimeString('vi-VN'), direction: 'GỬI', event });
     }
 
     on(event: string, callback: MessageCallback): () => void {
-        if (!this.messageListeners.has(event)) {
-            this.messageListeners.set(event, new Set());
-        }
-
-        this.messageListeners.get(event)!.add(callback);
-
-        return () => {this.messageListeners.get(event)?.delete(callback);};
+        let callbacks = this.messages.get(event);
+        if (!callbacks) { callbacks = new Set(); this.messages.set(event, callbacks); }
+        callbacks.add(callback);
+        return () => { callbacks?.delete(callback); if (!callbacks?.size) this.messages.delete(event); };
     }
-
-    onLog(callback: LogCallback): () => void {
-        this.logListeners.add(callback);
-        return () => { this.logListeners.delete(callback); };
-    }
-
-    private notifyLog(entry: ApiLogEntry): void {
-        this.logListeners.forEach(listener => listener(entry));
-    }
-
-    onStatus(callback: StatusCallback): () => void {
-        this.statusListeners.add(callback);
-
-        return () => {this.statusListeners.delete(callback);};
-    }
-
-    private notifyMessage(message: WebSocketMessage): void {
-        this.messageListeners.get(message.event)?.forEach((callback) => {
-            callback(message);
-        });
-    }
-
-    private notifyStatus(status: WebSocketState): void {
-        this.status = status;
-        this.notifyLog({ at: new Date().toLocaleTimeString("vi-VN"), direction: "TRẠNG THÁI", event: status });
-        this.statusListeners.forEach((callback) => callback(status));
-    }
+    onLog(callback: LogCallback): () => void { this.logs.add(callback); return () => { this.logs.delete(callback); }; }
+    onStatus(callback: StatusCallback): () => void { this.statuses.add(callback); return () => { this.statuses.delete(callback); }; }
 
     disconnect(): void {
-        this.socket?.close();
-        this.socket = null;
+        const old = this.socket;
+        if (!old) { this.updateStatus('DISCONNECTED'); return; }
+        this.release(old);
+        if (old.readyState === WebSocket.OPEN || old.readyState === WebSocket.CONNECTING) old.close();
+    }
+
+    private receive(raw: string): void {
+        let parsed: unknown;
+        try { parsed = JSON.parse(raw); } catch { return; }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+        const outer = parsed as Record<string, unknown>;
+        const maybeInner = outer.data;
+        const packet = typeof outer.event === 'string' ? outer : maybeInner && typeof maybeInner === 'object' && !Array.isArray(maybeInner)
+            ? maybeInner as Record<string, unknown> : outer;
+        if (typeof packet.event !== 'string') return;
+        const status = (packet.status ?? outer.status);
+        const message: WebSocketMessage = {
+            event: packet.event,
+            status: status === 'success' || status === 'error' ? status : undefined,
+            data: packet.data,
+            mes: typeof packet.mes === 'string' ? packet.mes : typeof outer.mes === 'string' ? outer.mes : undefined,
+        };
+        this.log({ at: new Date().toLocaleTimeString('vi-VN'), direction: 'NHẬN', event: message.event, status: message.status });
+        for (const callback of [...(this.messages.get(message.event) ?? [])]) callback(message);
+    }
+    private log(entry: ApiLogEntry): void { for (const callback of this.logs) callback(entry); }
+    private updateStatus(status: WebSocketState): void {
+        if (this.status === status) return;
+        this.status = status;
+        this.log({ at: new Date().toLocaleTimeString('vi-VN'), direction: 'TRẠNG THÁI', event: status });
+        for (const callback of this.statuses) callback(status);
     }
 }
 

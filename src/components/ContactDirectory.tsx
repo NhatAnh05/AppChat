@@ -40,9 +40,11 @@ function DirectoryRows({ entries, isGroup }: { entries: ContactEntry[]; isGroup:
   </div>;
 }
 
-export function ContactDirectory() {
+export function ContactDirectory({onRefresh, onCreateRoom,onJoinRoom}: {onRefresh?: () => void; onCreateRoom?: () => void; onJoinRoom?: () => void}) {
   const friends = useSelector((state: RootState) => state.contacts.friends);
   const groups = useSelector((state: RootState) => state.contacts.groups);
+  const loading = useSelector((state: RootState) => state.contacts.loading);
+  const error = useSelector((state: RootState) => state.contacts.error);
   const [activeTab, setActiveTab] = useState<DirectoryTab>("friends");
   const [query, setQuery] = useState("");
   const [ascending, setAscending] = useState(true);
@@ -50,8 +52,8 @@ export function ContactDirectory() {
   const filteredEntries = useMemo(() => {
     const normalizedQuery = normalize(query.trim());
     return entries
-      .filter((entry) => normalize(entry.name).includes(normalizedQuery))
-      .sort((a, b) => a.name.localeCompare(b.name, "vi", { sensitivity: "base" }) * (ascending ? 1 : -1));
+        .filter((entry) => normalize(entry.name).includes(normalizedQuery))
+        .sort((a, b) => a.name.localeCompare(b.name, "vi", { sensitivity: "base" }) * (ascending ? 1 : -1));
   }, [activeTab, ascending, query, entries]);
 
   const isFriends = activeTab === "friends";
@@ -90,6 +92,8 @@ export function ContactDirectory() {
           {query && <button type="button" onClick={() => setQuery("")} aria-label="Xóa tìm kiếm">×</button>}
         </label>
         <div className="directory-toolbar">
+          <button className="directory-sort" type="button" onClick={onRefresh} disabled={loading}>{loading ? 'Đang tải...' : 'Làm mới (API 5)'}</button>
+          {!isFriends && <><button className="directory-sort" type="button" onClick={onCreateRoom}><i className="bi bi-plus-circle"/> Tạo nhóm</button><button className="directory-sort" type="button" onClick={onJoinRoom}><i className="bi bi-box-arrow-in-right"/> Tham gia nhóm</button></>}
           <span>{filteredEntries.length === entries.length ? `Tất cả ${isFriends ? "bạn bè" : "nhóm"}` : `Hiển thị ${filteredEntries.length}/${entries.length}`}</span>
           <button className="directory-sort" onClick={() => setAscending((value) => !value)} aria-label={`Sắp xếp ${ascending ? "Z đến A" : "A đến Z"}`}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14m0 0-4-4m4 4 4-4M16 5h5l-5 7h5m-5 7h5"/></svg>
@@ -97,6 +101,7 @@ export function ContactDirectory() {
           </button>
         </div>
       </header>
+      {error && <p role="alert" className="login-error" style={{margin: '0 20px 10px'}}>{error}</p>}
       <DirectoryRows entries={filteredEntries} isGroup={!isFriends} />
     </section>
   </>;

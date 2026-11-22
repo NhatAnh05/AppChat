@@ -5,6 +5,7 @@ import {websocketService, type WebSocketState} from "../services/websocket.ts";
 
 type SidebarProps = {
   activeSection: string;
+  unreadCount: number;
   onSectionChange: (section: string) => void;
   settingsOpen: boolean;
   onSettingsToggle: () => void;
@@ -29,7 +30,7 @@ function NavIcon({ name }: { name: string }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="m19.4 15 .1.1a1.7 1.7 0 1 1-2.4 2.4l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a1.7 1.7 0 1 1-3.4 0v-.2a1.7 1.7 0 0 0-2.9-1.2l-.1.1a1.7 1.7 0 1 1-2.4-2.4l.1-.1a1.7 1.7 0 0 0-1.2-2.9H4a1.7 1.7 0 1 1 0-3.4h.2a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a1.7 1.7 0 1 1 2.4-2.4l.1.1a1.7 1.7 0 0 0 2.9-1.2V2a1.7 1.7 0 1 1 3.4 0v.2a1.7 1.7 0 0 0 2.9 1.2l.1-.1a1.7 1.7 0 1 1 2.4 2.4l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a1.7 1.7 0 1 1 0 3.4h-.2a1.7 1.7 0 0 0-1.2 2.9Z" /></svg>;
 }
 
-export function Sidebar({ activeSection, onSectionChange, settingsOpen, onSettingsToggle, onLogout }: SidebarProps) {
+export function Sidebar({ activeSection, unreadCount, onSectionChange, settingsOpen, onSettingsToggle, onLogout }: SidebarProps) {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileActionsRef = useRef<HTMLDivElement>(null);
   const userId = useSelector((state: RootState) => state.auth.userId);
@@ -69,7 +70,7 @@ export function Sidebar({ activeSection, onSectionChange, settingsOpen, onSettin
       {navItems.map((item) => {
         const isSettings = item.icon === 'settings';
         const selected = isSettings ? settingsOpen : activeSection === item.label;
-        const button = <button className={`nav-item ${selected ? 'is-active' : ''}`} onClick={() => isSettings ? onSettingsToggle() : onSectionChange(item.label)}><NavIcon name={item.icon} /><span>{item.label}</span></button>;
+        const button = <button className={`nav-item ${selected ? 'is-active' : ''}`} onClick={() => isSettings ? onSettingsToggle() : onSectionChange(item.label)}><NavIcon name={item.icon} /><span>{item.label}</span>{item.icon === 'message' && unreadCount > 0 && <span className="nav-unread-badge" aria-label={`${unreadCount} tin nhắn chưa đọc`}>{unreadCount > 99 ? '99+' : unreadCount}</span>}</button>;
         return <div key={item.label}>{button}</div>;
       })}
     </nav>

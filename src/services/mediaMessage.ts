@@ -27,8 +27,8 @@ export function parseMediaMessage(content: string): LyraMedia | null {
       const fileName = rawName.slice(0, 180);
       const ext = url.pathname.split(".").pop()?.toLowerCase();
       const kind: LyraMediaKind = ext === "gif" ? "gif" :
-        ["jpg", "jpeg", "png", "webp", "avif"].includes(ext || "") ? "image" :
-        ["mp4", "webm", "mov"].includes(ext || "") ? "video" : "file";
+          ["jpg", "jpeg", "png", "webp", "avif"].includes(ext || "") ? "image" :
+              ["mp4", "webm", "mov"].includes(ext || "") ? "video" : "file";
       return {kind, url: content.trim(), name: fileName};
     } catch { return null; }
   }
