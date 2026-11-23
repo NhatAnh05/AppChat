@@ -36,23 +36,36 @@ export function parseCreateRoomResponse(input: unknown): CreateRoomResponse | nu
       ? frame.mes.trim() : 'Máy chủ từ chối tạo nhóm.'};
   }
   if (frame.status !== 'success') return {status:'error',message:'Phản hồi CREATE_ROOM thiếu trạng thái hợp lệ.'};
+  // An ACK with status=success is not enough to reconstruct the room. The
+  // documented CREATE_ROOM response must include data.name/user/chatMess.
+  // Report the specific incompatible field without printing room/member data.
+  // A malformed ACK might still mean the server created the room; callers
+  // must not retry automatically and risk creating duplicate rooms.
   const data = frame.data;
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
-    return {status:'error',message:'Dữ liệu nhóm từ máy chủ không hợp lệ.'};
+    return {status:'error',message:'CREATE_ROOM: data không phải đối tượng nhóm theo chat_API.xlsx (cần name, user, chatMess). Kiểm tra phòng đã tồn tại trước khi thử lại.'};
   }
   const room = data as Record<string, unknown>;
-  if (typeof room.name !== 'string' || !room.name.trim() ||
-      !Array.isArray(room.user) || !Array.isArray(room.chatMess)) {
-    return {status:'error',message:'Dữ liệu nhóm từ máy chủ không hợp lệ.'};
+  if (typeof room.name !== 'string' || !room.name.trim()) {
+    return {status:'error',message:'CREATE_ROOM: thiếu data.name (tên nhóm dạng chuỗi) trong phản hồi máy chủ. Kiểm tra phòng đã tồn tại trước khi thử lại.'};
+  }
+  if (!Array.isArray(room.user)) {
+    return {status:'error',message:'CREATE_ROOM: data.user phải là mảng thành viên theo chat_API.xlsx. Kiểm tra phòng đã tồn tại trước khi thử lại.'};
+  }
+  if (!Array.isArray(room.chatMess)) {
+    return {status:'error',message:'CREATE_ROOM: data.chatMess phải là mảng tin nhắn theo chat_API.xlsx. Kiểm tra phòng đã tồn tại trước khi thử lại.'};
   }
   const members: CreatedRoomMember[] = [];
-  for (const item of room.user) {
+  for (const [index, item] of room.user.entries()) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
-      return {status:'error',message:'Danh sách thành viên nhóm không hợp lệ.'};
+      return {status:'error',message:`CREATE_ROOM: data.user[${index}] phải là đối tượng thành viên {id, name}.`};
     }
     const member = item as Record<string, unknown>;
-    if (!Number.isInteger(member.id) || typeof member.name !== 'string' || !member.name.trim()) {
-      return {status:'error',message:'Danh sách thành viên nhóm không hợp lệ.'};
+    if (!Number.isInteger(member.id)) {
+      return {status:'error',message:`CREATE_ROOM: data.user[${index}].id phải là số nguyên theo chat_API.xlsx.`};
+    }
+    if (typeof member.name !== 'string' || !member.name.trim()) {
+      return {status:'error',message:`CREATE_ROOM: data.user[${index}].name phải là tên thành viên dạng chuỗi.`};
     }
     members.push({id: member.id as number, name: member.name.trim()});
   }
