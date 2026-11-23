@@ -4,11 +4,49 @@ import { clearLoginSession, readLoginSession, saveLoginSession, type SavedLoginS
 import { reLoginOnce, ReLoginRejectedError } from './reLoginService.ts';
 
 const LOGIN_TIMEOUT = 12000;
+const RETRY_DELAY_START_MS = 20_000;
+const RETRY_DELAY_MAX_MS = 120_000;
 let activeSocket: WebSocket | null = null;
 let pendingRecovery: Promise<SavedLoginSession | null> | null = null;
 let recoveryAbort: AbortController | null = null;
 let generation = 0;
 let signingOut = false;
+let recoveryRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let nextRetryDelayMs = RETRY_DELAY_START_MS;
+
+function cancelScheduledRetry(): void {
+  if (recoveryRetryTimer !== null) clearTimeout(recoveryRetryTimer);
+  recoveryRetryTimer = null;
+}
+
+/** Three failed handshakes pause retries, but NEVER discard a valid saved session. */
+function scheduleRecoveryRetry(token: number): void {
+  if (recoveryRetryTimer !== null || signingOut || token !== generation || !readLoginSession()) return;
+  const delay = nextRetryDelayMs;
+  nextRetryDelayMs = Math.min(delay * 2, RETRY_DELAY_MAX_MS);
+  recoveryRetryTimer = setTimeout(() => {
+    recoveryRetryTimer = null;
+    if (!signingOut && token === generation && !getAuthenticatedSocket()) {
+      void restoreLoginSession();
+    }
+  }, delay);
+}
+
+/** Reconnect promptly after returning to the tab or regaining network access. */
+function retryWhenAvailable(): void {
+  if (signingOut || getConnectionState() !== 'offline' || !readLoginSession()) return;
+  cancelScheduledRetry();
+  void restoreLoginSession();
+}
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('online', retryWhenAvailable);
+  window.addEventListener('focus', retryWhenAvailable);
+}
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') retryWhenAvailable();
+  });
+}
 
 export function getAuthenticatedSocket(): WebSocket | null {
   return !signingOut && activeSocket?.readyState === WebSocket.OPEN ? activeSocket : null;
@@ -17,6 +55,8 @@ export function getAuthenticatedSocket(): WebSocket | null {
 function activate(socket: WebSocket, session: SavedLoginSession, token: number): void {
   if (token !== generation || signingOut) { socket.close(); return; }
   activeSocket = socket;
+  cancelScheduledRetry();
+  nextRetryDelayMs = RETRY_DELAY_START_MS;
   saveLoginSession(session);
   const oldClose = socket.onclose;
   socket.onclose = event => {
@@ -97,11 +137,13 @@ export function restoreLoginSession(): Promise<SavedLoginSession | null> {
   if (pendingRecovery) return pendingRecovery;
   const session = readLoginSession();
   if (!session) { setConnectionState('signed-out'); return Promise.resolve(null); }
+  cancelScheduledRetry();
   const token = generation;
   const controller = new AbortController();
   recoveryAbort = controller;
   setConnectionState('reconnecting');
   const work = (async () => {
+    let backendRejectedSession = false;
     for (let attempt = 0; attempt < 3; attempt++) {
       if (controller.signal.aborted || token !== generation) return null;
       try {
@@ -113,7 +155,10 @@ export function restoreLoginSession(): Promise<SavedLoginSession | null> {
         return result.session;
       } catch (error) {
         if (controller.signal.aborted || token !== generation) return null;
-        if (error instanceof ReLoginRejectedError) break;
+        if (error instanceof ReLoginRejectedError) {
+          backendRejectedSession = true;
+          break;
+        }
         if (attempt < 2) await new Promise<void>(resolve => {
           const timer = setTimeout(() => {controller.signal.removeEventListener('abort', onAbort); resolve();}, 1000);
           const onAbort = () => {clearTimeout(timer); resolve();};
@@ -121,9 +166,18 @@ export function restoreLoginSession(): Promise<SavedLoginSession | null> {
         });
       }
     }
-    if (token === generation) {
-      clearLoginSession();
-      setConnectionState('signed-out');
+    if (token === generation && !signingOut) {
+      if (backendRejectedSession || !readLoginSession()) {
+        // Explicit server rejection or expired local credentials: sign out.
+        cancelScheduledRetry();
+        clearLoginSession();
+        setConnectionState('signed-out');
+      } else {
+        // Network failure/timeouts are NOT a logout. Preserve the session and
+        // retry later, with capped backoff to avoid a busy reconnect loop.
+        setConnectionState('offline');
+        scheduleRecoveryRetry(token);
+      }
     }
     return null;
   })();
@@ -139,13 +193,19 @@ export async function ensureLoginConnection(): Promise<void> {
   if (getAuthenticatedSocket()) return;
   if (getConnectionState() === 'signing-out' || signingOut) throw new Error('Đang đăng xuất.');
   const result = await restoreLoginSession();
-  if (!result || !getAuthenticatedSocket()) throw new Error('Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.');
+  if (!result || !getAuthenticatedSocket()) {
+    if (getConnectionState() === 'offline' || getConnectionState() === 'reconnecting') {
+      throw new Error('Tạm mất kết nối máy chủ. Phiên đăng nhập được giữ lại và ứng dụng sẽ tự thử kết nối lại.');
+    }
+    throw new Error('Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.');
+  }
 }
 
 /** Freeze reconnect immediately, but preserve session until ACK is received. */
 export function beginLogoutSession(): WebSocket | null {
   signingOut = true;
   generation++;
+  cancelScheduledRetry();
   recoveryAbort?.abort();
   const current = getAuthenticatedSocketUnsafe();
   activeSocket = null;
@@ -159,6 +219,8 @@ function getAuthenticatedSocketUnsafe(): WebSocket | null {
 export function disconnectLoginSession(): void {
   signingOut = true;
   generation++;
+  cancelScheduledRetry();
+  nextRetryDelayMs = RETRY_DELAY_START_MS;
   recoveryAbort?.abort();
   const old = activeSocket;
   activeSocket = null;

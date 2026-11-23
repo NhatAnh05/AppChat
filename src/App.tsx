@@ -31,7 +31,7 @@ import { notifyIncomingMessage } from "./services/desktopNotifications.ts";
 import { PRESENCE_REFRESH_MS } from "./services/chatRefreshPolicy.ts";
 import { logoutCurrentSession } from "./services/logoutService.ts";
 import { clearContacts, setContactOnline, clearOnlineStatuses } from "./features/contacts/contactsSlice";
-import { subscribeConnectionState } from "./services/connectionHealth.ts";
+import { getConnectionState, subscribeConnectionState } from "./services/connectionHealth.ts";
 import { getChatUnread, getTotalUnreadForChats, markChatRead, readUnreadLedger, recordIncomingMessage,
     reconcileUnreadMessages, saveUnreadLedger } from "./services/unreadNotifications.ts";
 
@@ -77,6 +77,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const [apiLogs, setApiLogs] = useState<ApiLogEntry[]>([]);
     const apiLogBuffer = useRef<ApiLogEntry[]>([]);
     const [connectionStatus, setConnectionStatus] = useState<WebSocketState>(websocketService.getStatus());
+    const [authConnectionState, setAuthConnectionState] = useState(getConnectionState());
     const [pinnedIds] = useState<string[]>(() => {
         try { return JSON.parse(localStorage.getItem(`lyra-pins-${currentUserId}`) || "[]") as string[]; }
         catch { return []; }
@@ -102,6 +103,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         if (connectionStatus !== 'CONNECTED') dispatch(clearOnlineStatuses());
     }, [connectionStatus, dispatch]);
     useEffect(() => subscribeConnectionState(state => {
+        setAuthConnectionState(state);
         if (state === 'signed-out') {
             dispatch(clearCredentials());
             navigate('/login', {replace:true});
@@ -652,7 +654,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                         <button type="button" aria-label="Đóng thông báo nhóm" onClick={() => setGroupNotice('')}>×</button>
                     </div>}
                     <div className="lyra-status-dock">
-                        <span className={`api-state ${connectionStatus === "CONNECTED" ? "connected" : ""}`}><i className="bi bi-wifi"/> {connectionStatus === "CONNECTED" ? "Đã kết nối API" : connectionStatus === "CONNECTING" ? "Đang kết nối" : "Mất kết nối API"}</span>
+                        <span className={`api-state ${connectionStatus === "CONNECTED" ? "connected" : ""}`}><i className="bi bi-wifi"/> {authConnectionState === "offline" ? "Tạm mất kết nối — phiên đăng nhập vẫn được giữ" : authConnectionState === "reconnecting" ? "Đang khôi phục kết nối..." : connectionStatus === "CONNECTED" ? "Đã kết nối API" : connectionStatus === "CONNECTING" ? "Đang kết nối" : "Mất kết nối API"}</span>
                         <button onClick={() => void refreshChats()}><i className="bi bi-arrow-repeat"/> Làm mới hội thoại</button>
                         <button onClick={exportHistory}><i className="bi bi-download"/> Sao lưu lịch sử</button>
                         <label className="dock-upload"><i className="bi bi-upload"/> Nhập lịch sử<input type="file" accept=".json,application/json" onChange={(event) => {void importHistory(event.target.files?.[0]); event.target.value = "";}}/></label>
