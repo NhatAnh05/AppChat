@@ -1,21 +1,20 @@
 /**
- * API documentation uses CHAT_PEOPLE_GET_MES for both kinds of history.
- * The live server currently accepts GET_PEOPLE_CHAT_MES for 1:1 history.
- * Keep both aliases so older/newer server deployments remain compatible.
- * There is no request ID in responses, so all history requests share ONE queue.
+ * Excel specifies GET_PEOPLE_CHAT_MES for people and GET_ROOM_CHAT_MES for rooms.
+ * Keep the existing CHAT_PEOPLE_GET_MES compatibility alias only for ACTION_NOT_EXIT.
+ * Responses have no request ID, so both history types share one queue.
  */
 import { ensureLoginConnection } from './loginService.ts';
 import { websocketService, type WebSocketMessage } from './websocket.ts';
-import { CHAT_HISTORY_EVENT, ROOM_HISTORY_ERROR_EVENT } from './chatApiEvents.ts';
+import { CHAT_HISTORY_EVENT, ROOM_HISTORY_EVENT } from './chatApiEvents.ts';
 import { withApiProbeGate } from './apiProbeGate.ts';
 
 export const HISTORY_EVENT = CHAT_HISTORY_EVENT;
-const ROOM_ERROR_EVENT = ROOM_HISTORY_ERROR_EVENT;
+const ROOM_EVENT = ROOM_HISTORY_EVENT;
 type HistoryKind = 'people' | 'room';
 let queue: Promise<void> = Promise.resolve();
 const ALTERNATES: Record<HistoryKind, string> = {
   people: 'GET_PEOPLE_CHAT_MES',
-  room: 'GET_ROOM_CHAT_MES',
+  room: ROOM_HISTORY_EVENT,
 };
 let currentSocket: WebSocket | null = null;
 const unsupported = new Set<HistoryKind>();
@@ -42,17 +41,15 @@ export function resetHistoryCompatibility(): void {
 }
 
 export function historyEventCandidates(kind: HistoryKind): string[] {
-  // On the currently deployed server, 1:1 requests using the documented
-  // event generate ACTION_NOT_EXIT. Ask the proven working alias FIRST to
-  // avoid one spurious error on every new socket / browser refresh.
-  // Room history has not been verified with that alias: keep documented first.
-  const first = preferredEvent.get(kind) ?? (kind === 'people' ? ALTERNATES.people : HISTORY_EVENT);
+  // Request the Excel event first for both kinds of chat history.
+  // Use the older alias only if the server explicitly rejects the event.
+  const first = preferredEvent.get(kind) ?? ALTERNATES[kind];
   return [...new Set([first, HISTORY_EVENT, ALTERNATES[kind]])];
 }
 
 
 export function historyResponseMatches(message: WebSocketMessage, kind: HistoryKind, name: string): boolean {
-  if (message.event === ROOM_ERROR_EVENT && kind !== 'room') return false;
+  if (message.event === ROOM_EVENT && kind !== 'room') return false;
   if (message.event !== HISTORY_EVENT && message.event !== ALTERNATES[kind]) return false;
   if (message.status === 'error') return true; // shared event; queue guarantees one outstanding request
   if (kind === 'people') return Array.isArray(message.data);
@@ -93,9 +90,6 @@ export function requestChatHistory(name: string, page: number, kind: HistoryKind
           };
           cleanups.push(websocketService.on(HISTORY_EVENT, receive));
           cleanups.push(websocketService.on(ALTERNATES[kind], receive));
-          if (kind === 'room' && ALTERNATES[kind] !== ROOM_ERROR_EVENT) {
-            cleanups.push(websocketService.on(ROOM_ERROR_EVENT, receive));
-          }
           cleanups.push(websocketService.on('ACTION_NOT_EXIT', () => finish(new Error('ACTION_NOT_EXIT'))));
           cleanups.push(websocketService.onStatus(status => {
             if (status === 'ERROR' || status === 'DISCONNECTED') finish(new Error('Mất kết nối khi tải lịch sử.'));
