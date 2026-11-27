@@ -1,52 +1,69 @@
-# LyraChat — Giai đoạn 1: Ổn định nhắn tin
+# Giai đoạn 1 – Ổn định hệ thống AppChat
 
-## Nguồn đối chiếu
+## Mục tiêu và phạm vi
 
-- Source gốc: `AppChat-main (5)(1).zip` (ngày 18/11/2026).
-- Tài liệu: `API_Chat_WebSocket_Tu_Anh.xlsx` (sheet `API WebSocket`, `Lưu ý`).
-- Endpoint mặc định: `wss://chat.longapp.io.vn/chat/chat` (có thể thay bằng `VITE_CHAT_WS_URL`).
+- Source đầu vào: `AppChat(1).zip` người dùng cung cấp.
+- Đối chiếu theo `API_Chat_WebSocket_Tu_Anh.xlsx` (sheet `API WebSocket`).
+- Không thay đổi giao diện hoặc mô hình máy chủ, không thay backend của giảng viên.
+- Sửa lỗi unit/integration test, thống nhất API lịch sử, đồng bộ gửi `SEND_CHAT` cá nhân/nhóm và hạn chế lộ mã phiên.
 
-## Thay đổi đã thực hiện
+## Các điểm đã sửa
 
-1. **Đúng event lịch sử:** Cả tin nhắn cá nhân và nhóm gửi `CHAT_PEOPLE_GET_MES` như tài liệu. Phản hồi lỗi nhóm `GET_ROOM_CHAT_MES` vẫn được chấp nhận theo ghi chú không nhất quán của tài liệu.
-2. **Hàng đợi lịch sử dùng chung:** Vì phản hồi server không có request ID, yêu cầu lịch sử cá nhân/nhóm thực hiện tuần tự và kiểm tra cấu trúc phản hồi, tránh nhận nhầm lịch sử giữa hai loại chat.
-3. **Xác nhận SEND_CHAT chặt chẽ:** Tin nhắn cá nhân chỉ được xác nhận nếu phản hồi chứa người nhận và nội dung trùng yêu cầu. ACK không có định danh sẽ không tự được coi là thành công; thay vào đó kiểm tra lịch sử. Chat nhóm và cá nhân dùng chung hàng đợi gửi để giảm nhầm ACK.
-4. **Trạng thái gửi:** Hiển thị `Đang gửi`, `Chưa xác minh đã gửi` hoặc `Gửi thất bại`; không tự động gửi lại tin khi không rõ server đã lưu hay chưa.
-5. **Đối soát dữ liệu khi tải lại lịch sử:** Ghép tin tạm thời với bản ghi server theo nội dung, người gửi/người nhận và thời gian, tránh xuất hiện hai bong bóng cho cùng tin.
-6. **Kết nối lại:** Khi WebSocket kết nối trở lại, hủy trạng thái cache lịch sử và tải lại cuộc trò chuyện đang mở.
-7. **Quản lý phiên:** Redux không còn ghi `RE_LOGIN_CODE` hoặc `userId` xuống localStorage. Mã phiên vẫn được `sessionStore.ts` lưu vào sessionStorage và xoay vòng bằng RE_LOGIN.
-8. **Emoji:** Giữ mã hóa/giải mã tương thích từ bản source gốc; thêm test văn bản kết hợp emoji và emoji phức hợp.
-9. **Nhóm:** Lịch sử nhóm dùng event mới và được đối chiếu bằng tên phòng; luồng gửi nhóm dùng hàng đợi SEND_CHAT chung.
-
-## Chạy bằng WebStorm
-
-1. Giải nén và mở thư mục `AppChat-main`.
-2. Mở terminal, chạy `npm install`.
-3. Chạy `npm run dev:full` (gồm frontend và media server; máy cần Node.js tương thích Vite trong package.json).
-4. Mở `http://localhost:5173/chat`.
-5. Dùng **hai tài khoản khác nhau**, trên hai trình duyệt riêng hoặc cửa sổ ẩn danh. Không dùng cùng một sessionStorage.
-
-## Kịch bản kiểm thử thủ công bắt buộc
-
-| # | Bước thực hiện | Kết quả mong đợi |
+| Hạng mục | Trước | Sau |
 |---|---|---|
-| 1 | Tài khoản A gửi `Xin chào` cho B | B nhận; F5 vẫn có lịch sử |
-| 2 | A gửi `😍` và `Xin chào 😍` | B thấy đúng cả chữ lẫn emoji |
-| 3 | B trả lời A rồi A mất mạng 10 giây | Khi A có mạng, lịch sử được tải bù |
-| 4 | A tạo/tham gia nhóm, gửi `Chào nhóm ❤️` | Thành viên thấy nội dung, F5 vẫn có |
-| 5 | Gửi liên tục tin cá nhân và nhóm | Không lấy nhầm ACK và lịch sử |
-| 6 | Đăng xuất, F5 | Không tự đăng nhập lại với mã phiên cũ |
-| 7 | Mở DevTools > Application > Local Storage | Không có khóa `reLoginCode` được ghi bởi authSlice |
-| 8 | Cố ý ngắt mạng ngay sau khi nhấn Gửi | Tin chưa xác minh có nhãn rõ ràng; không tự gửi lại |
+| Lấy lịch sử cá nhân | `GET_PEOPLE_CHAT_MES` | `CHAT_PEOPLE_GET_MES` |
+| Lấy lịch sử phòng | `GET_ROOM_CHAT_MES` | `CHAT_PEOPLE_GET_MES` |
+| Lỗi lịch sử phòng | Chỉ nhận event cũ | Vẫn nhận `GET_ROOM_CHAT_MES` **khi status=error** như tài liệu |
+| Ghép phản hồi lịch sử | Hai queue riêng | Một queue chung, phân biệt phản hồi theo cấu trúc và tên nhóm |
+| Gửi chat cá nhân/nhóm | Hai queue riêng | Queue chung cho `SEND_CHAT`, giảm ghép nhầm ACK |
+| ACK chat cá nhân | Có thể nhận success không có payload | Chỉ xác nhận khi `to`, `mes` khớp (và người gửi nếu có); không tự coi success trống là đã gửi |
+| Test realtime | Lỗi import module không có `.ts` | Import TypeScript hợp lệ trong Node 22 với `--experimental-strip-types` |
+| Mã `RE_LOGIN_CODE` | Vào Redux action/state và localStorage | Chỉ do `loginService/sessionStore` lưu trong sessionStorage của tab |
+| TypeScript | Lỗi kiểu `online` tùy chọn trong `App.tsx` | Bổ sung type `ContactEntry[]` để giữ giá trị optional |
+| README | Còn dấu xung đột Git | Viết lại hướng dẫn cài đặt/chạy/test |
 
-## Kiểm thử tự động
+### Giải thích quan trọng
 
-`npm test` → **158/158 PASS** với Node.js v22.16.0 trong môi trường phân tích.
+Theo tài liệu, cả chat cá nhân và chat nhóm gọi `CHAT_PEOPLE_GET_MES` với `{name,page}`. Phản hồi thành công cá nhân có `data` dạng mảng; phòng có `data` dạng đối tượng gồm `name`, `user`, `chatMess`. Vì backend không trả request ID, client chỉ thực hiện **một yêu cầu lịch sử tại một thời điểm**. Với nhóm, client kiểm tra thêm tên phòng. Tài liệu ghi `GET_ROOM_CHAT_MES` cho **lỗi** phòng nên vẫn hỗ trợ nhận lỗi đó, nhưng **không gửi** request bằng event cũ.
 
-## Giới hạn và việc cần xác minh
+Cả tin nhắn cá nhân và nhóm đều dùng `SEND_CHAT`. Client dùng một hàng đợi chung để tránh đồng thời có hai yêu cầu không phân biệt được ACK. Một success thiếu `to`/`mes` sẽ không xác nhận gửi thành công; luồng cá nhân sẽ thử đối chiếu lịch sử trước khi quyết định kết quả. Khi mất mạng hoặc timeout, người dùng **không nên nhấn gửi lại liên tục** vì server có thể đã lưu tin nhắn dù ACK bị mất.
 
-- Chưa thể kiểm thử thực tế hai tài khoản trên API production trong môi trường đóng gói. Server có thể trả phản hồi khác tài liệu; dùng nút **Nhật ký API** để đối chiếu.
-- API không có `clientMessageId`, vì thế phản hồi trễ và hai tin có nội dung giống nhau gửi sát nhau không thể được phân biệt tuyệt đối. Không báo `đã gửi` khi chưa có bằng chứng.
-- Polling 4,5 giây của source gốc vẫn giữ để dự phòng server không broadcast; giai đoạn sau có thể tối ưu khi biết chắc server đẩy sự kiện đầy đủ.
-- Hệ thống media và gọi thoại/video nằm ngoài phạm vi giai đoạn 1; không thay đổi.
-- `npm run build` chưa chạy đầy đủ trong môi trường đóng gói do thiếu dependency trong bộ nhớ đệm npm (`npm ci --offline` thất bại). Cần chạy `npm install` rồi `npm run build` trên máy người dùng.
+Phiên đăng nhập vẫn tự khôi phục sau F5 trong cùng tab khi token còn hiệu lực. Không còn chứa token trong Redux, localStorage. Đây là cải thiện quản lý phiên phía client, **không** thay thế xác thực và phân quyền backend.
+
+## Kết quả kiểm thử
+
+- Trước khi sửa: **174/177 PASS**, 3 lỗi.
+- Sau khi sửa và bổ sung test: **181/181 PASS**, bao gồm test mô phỏng chiều A→B, B→A, ACK trống, ACK nhóm không liên quan và hàng đợi gửi.
+- Kiểm tra TypeScript `tsc -b`: **PASS** với các dependencies lấy từ ZIP.
+- `npm run lint` trong source hiện còn **10 lỗi, 3 cảnh báo có sẵn**, chủ yếu quy tắc React Hooks, thay đổi state trong effect và một số quy tắc lint ở các file ngoài luồng API/phiên; chưa sửa ngoài phạm vi Giai đoạn 1.
+- `vite build` trên môi trường kiểm tra Linux: **chưa xác nhận**, vì ZIP có binding Rolldown dành cho Windows nhưng thiếu binary Linux, và npm network install không hoàn tất. Chạy `npm ci && npm run build` trên máy Windows/WebStorm.
+- Các test trên chỉ mô phỏng WebSocket và kiểm tra logic client. **Chưa test trực tiếp trên server giảng viên bằng tài khoản thật**, nên không khẳng định hai phía đã nhận tin thành công ngoài thực tế.
+
+## Hướng dẫn chạy và kiểm thử thủ công
+
+```powershell
+npm ci
+npm test
+npm run build
+npm run dev:full
+```
+
+Truy cập đường dẫn Vite hiển thị (mặc định `http://localhost:5173`). Dùng **2 tài khoản A và B** khác nhau, hai cửa sổ trình duyệt tách biệt:
+
+1. A gửi `Xin chào`, B nhận ngay và có đúng tên người gửi.
+2. B gửi `Đã nhận ❤️`, A nhận và hiển thị đủ chữ + emoji.
+3. F5 cả hai trình duyệt: lịch sử phải tải lại, không nhân đôi tin.
+4. A và B tham gia cùng nhóm, gửi tin hai chiều; A chuyển qua chat cá nhân khi B đang gửi nhóm và kiểm tra không nhầm ACK.
+5. Đóng kết nối/tắt mạng 5–10 giây, kết nối lại và kiểm tra việc đồng bộ lịch sử.
+6. Logout rồi F5: không khôi phục phiên đã thoát.
+7. Mở DevTools > Application > Local Storage: không có `reLoginCode` hoặc `userId` từ authSlice; kiểm tra Session Storage có `appchat:auth:relogin:v1` khi đang đăng nhập (không sao chép mã này).
+8. Thử gửi lại đúng một lần chỉ khi biết chắc server chưa lưu; không nhấn gửi liên tục khi ACK bị mất.
+
+Có sẵn `npm run test:realtime:live` để kiểm tra trực tiếp A→B và B→A. Lệnh cần bốn biến môi trường `CHAT_TEST_USER_A`, `CHAT_TEST_PASS_A`, `CHAT_TEST_USER_B`, `CHAT_TEST_PASS_B`, dùng tài khoản thử nghiệm được phép và sẽ gửi hai tin thật. Xem `README.md`.
+
+## Những hạn chế chưa giải quyết bằng frontend
+
+- Backend không cung cấp client request ID, server receipt/đã xem; phản hồi rất muộn vẫn có thể khó ghép tuyệt đối.
+- Nếu server thực không hỗ trợ event như tài liệu hoặc không broadcast đúng, frontend không thể tự bảo đảm realtime. Hãy dùng Nhật ký API và script kiểm tra server để phân biệt lỗi.
+- Dữ liệu nháp, ghim, hồ sơ và một số trạng thái vẫn lưu cục bộ trong trình duyệt, không tự đồng bộ giữa máy nếu thiếu API.
+- Không thay đổi media server và tính năng gọi thoại/video trong giai đoạn này.

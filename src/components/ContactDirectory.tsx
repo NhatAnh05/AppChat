@@ -9,7 +9,7 @@ function normalize(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("vi");
 }
 
-function DirectoryRows({ entries, isGroup }: { entries: ContactEntry[]; isGroup: boolean }) {
+function DirectoryRows({ entries, isGroup, onOpenGroup }: { entries: ContactEntry[]; isGroup: boolean; onOpenGroup?: (entry: ContactEntry) => void }) {
   let previousLetter = "";
 
   if (entries.length === 0) {
@@ -34,13 +34,23 @@ function DirectoryRows({ entries, isGroup }: { entries: ContactEntry[]; isGroup:
             <span>{entry.detail}</span>
           </span>
           {entry.online && <span className="directory-online-label">Đang hoạt động</span>}
+          {isGroup && onOpenGroup && (
+            <button type="button" className="directory-group-open" onClick={() => onOpenGroup(entry)}>
+              <i className="bi bi-chat-dots" /> Mở nhóm
+            </button>
+          )}
         </article>
       </div>;
     })}
   </div>;
 }
 
-export function ContactDirectory({onRefresh, onCreateRoom,onJoinRoom}: {onRefresh?: () => void; onCreateRoom?: () => void; onJoinRoom?: () => void}) {
+export function ContactDirectory({onRefresh, onCreateRoom, onJoinRoom, onOpenGroup}: {
+  onRefresh?: () => void;
+  onCreateRoom?: () => void;
+  onJoinRoom?: () => void;
+  onOpenGroup?: (entry: ContactEntry) => void;
+}) {
   const friends = useSelector((state: RootState) => state.contacts.friends);
   const groups = useSelector((state: RootState) => state.contacts.groups);
   const loading = useSelector((state: RootState) => state.contacts.loading);
@@ -102,7 +112,7 @@ export function ContactDirectory({onRefresh, onCreateRoom,onJoinRoom}: {onRefres
         </div>
       </header>
       {error && <p role="alert" className="login-error" style={{margin: '0 20px 10px'}}>{error}</p>}
-      <DirectoryRows entries={filteredEntries} isGroup={!isFriends} />
+      <DirectoryRows entries={filteredEntries} isGroup={!isFriends} onOpenGroup={onOpenGroup} />
     </section>
   </>;
 }

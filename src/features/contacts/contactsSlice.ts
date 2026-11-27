@@ -43,12 +43,19 @@ const contactsSlice = createSlice({
     },
 
     setGroups: (state, action: PayloadAction<ContactEntry[]>) => {
-      state.groups = action.payload;
+      // Không thêm trùng nhóm khi GET_USER_LIST trả tên khác chữ hoa/thường.
+      const unique = new Map<string, ContactEntry>();
+      for (const group of action.payload) {
+        unique.set(group.id.trim().toLocaleLowerCase('vi'), group);
+      }
+      state.groups = [...unique.values()];
       state.error = null;
     },
 
     addGroup: (state, action: PayloadAction<ContactEntry>) => {
-      const exists = state.groups.some(group => group.id === action.payload.id);
+      const exists = state.groups.some(group =>
+        group.id.trim().toLocaleLowerCase('vi') === action.payload.id.trim().toLocaleLowerCase('vi')
+      );
 
       if (!exists) {
         state.groups.push(action.payload);
@@ -56,7 +63,9 @@ const contactsSlice = createSlice({
     },
 
     removeGroup: (state, action: PayloadAction<string>) => {
-      state.groups = state.groups.filter(group => group.id !== action.payload);
+      state.groups = state.groups.filter(group =>
+        group.id.trim().toLocaleLowerCase('vi') !== action.payload.trim().toLocaleLowerCase('vi')
+      );
 
       if (state.selectedContactId === action.payload) {
         state.selectedContactId = null;

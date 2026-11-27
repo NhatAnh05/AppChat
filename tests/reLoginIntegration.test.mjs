@@ -113,7 +113,7 @@ test('Đóng phiên trong lúc đang RE_LOGIN: đóng socket, không được h�
   assert.equal(getAuthenticatedSocket(), null);
 });
 
-test('Mạng lỗi liên tục: thử đúng 3 lần rồi dừng, không lặp vô hạn', async () => {
+test('Mạng lỗi 3 lần: giữ phiên và trạng thái offline, không tự đăng xuất', async () => {
   disconnectLoginSession();
   saveLoginSession({username:'abc_01',reLoginCode:'nlu_lost_network'});
   const before = FakeSocket.instances.length;
@@ -128,6 +128,89 @@ test('Mạng lỗi liên tục: thử đúng 3 lần rồi dừng, không lặp 
   }
   assert.equal(await pending, null);
   assert.equal(FakeSocket.instances.length, before + 3);
+  assert.equal(readLoginSession()?.reLoginCode, 'nlu_lost_network');
+  assert.equal(getConnectionState(), 'offline');
+  // The next reconnect burst is delayed (no infinite immediate retry loop).
+  assert.equal(FakeSocket.instances.length, before + 3);
+  disconnectLoginSession();
+});
+
+test('Mất kết nối khi đang đọc chat, 3 lần khôi phục lỗi mạng không phá phiên', async () => {
+  disconnectLoginSession();
+  const pendingLogin = loginAccount({username:'abc_01', password:'test-only'});
+  const chatSocket = FakeSocket.instances.at(-1);
+  chatSocket.open();
+  chatSocket.receive({event:'LOGIN', status:'success', data:{RE_LOGIN_CODE:'nlu_idle'}});
+  await pendingLogin;
+  assert.equal(getConnectionState(), 'connected');
+
+  const before = FakeSocket.instances.length;
+  chatSocket.close(); // Happens when idle or network switches, without clicking Logout.
+  assert.equal(getConnectionState(), 'reconnecting');
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let i = 0; i < 320 && FakeSocket.instances.length < before + attempt; i++) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.equal(FakeSocket.instances.length, before + attempt);
+    const recoverySocket = FakeSocket.instances.at(-1);
+    recoverySocket.open();
+    recoverySocket.onerror?.({});
+  }
+  for (let i = 0; i < 320 && getConnectionState() !== 'offline'; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(getConnectionState(), 'offline');
+  assert.equal(readLoginSession()?.reLoginCode, 'nlu_idle');
+  assert.equal(getAuthenticatedSocket(), null);
+  disconnectLoginSession();
+});
+
+test('Mạng hồi phục: online kích hoạt RE_LOGIN, cập nhật code và giữ người dùng trong chat', async () => {
+  disconnectLoginSession();
+  saveLoginSession({username:'abc_01',reLoginCode:'nlu_offline'});
+  const initial = FakeSocket.instances.length;
+  const pending = restoreLoginSession();
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const wanted = initial + attempt;
+    for (let i = 0; i < 320 && FakeSocket.instances.length < wanted; i++) await new Promise(r => setTimeout(r, 10));
+    assert.equal(FakeSocket.instances.length, wanted);
+    const socket = FakeSocket.instances.at(-1);
+    socket.open(); socket.onerror?.({});
+  }
+  assert.equal(await pending, null);
+  assert.equal(getConnectionState(), 'offline');
+  window.dispatchEvent(new Event('online'));
+  assert.equal(FakeSocket.instances.length, initial + 4);
+  const next = FakeSocket.instances.at(-1);
+  next.open();
+  assert.equal(next.messages[0].data.event, 'RE_LOGIN');
+  assert.equal(next.messages[0].data.data.code, 'nlu_offline');
+  next.receive({event:'RE_LOGIN', status:'success', data:{RE_LOGIN_CODE:'nlu_reconnected'}});
+  await tick();
+  assert.equal(getConnectionState(), 'connected');
+  assert.equal(getAuthenticatedSocket(), next);
+  assert.equal(readLoginSession()?.reLoginCode, 'nlu_reconnected');
+  disconnectLoginSession();
+});
+
+test('Đăng xuất khi offline: không được tái kết nối do sự kiện online/focus', async () => {
+  disconnectLoginSession();
+  saveLoginSession({username:'abc_01',reLoginCode:'nlu_logout_offline'});
+  const initial = FakeSocket.instances.length;
+  const pending = restoreLoginSession();
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let i = 0; i < 320 && FakeSocket.instances.length < initial + attempt; i++) await new Promise(r => setTimeout(r, 10));
+    const socket = FakeSocket.instances.at(-1);
+    socket.open(); socket.onerror?.({});
+  }
+  await pending;
+  assert.equal(getConnectionState(), 'offline');
+  disconnectLoginSession();
+  const count = FakeSocket.instances.length;
+  window.dispatchEvent(new Event('online'));
+  window.dispatchEvent(new Event('focus'));
+  await tick();
+  assert.equal(FakeSocket.instances.length, count);
   assert.equal(readLoginSession(), null);
   assert.equal(getConnectionState(), 'signed-out');
 });

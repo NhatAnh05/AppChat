@@ -9,7 +9,7 @@ const app=readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8');
 
 test('Lịch sử chat gọi API từ người dùng đã xác thực, không tự xác nhận kết quả',()=>{
   assert.match(chatService,/await ensureLoginConnection\(\)/);
-  assert.match(chatService,/GET_PEOPLE_CHAT_MES/);
+  assert.match(chatService,/requestChatHistory/);
   assert.match(chatService,/response\.status === "error"/);
 });
 test('Giao diện hiển thị trạng thái API, không coi mất mạng là lịch sử thành công',()=>{

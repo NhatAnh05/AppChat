@@ -8,6 +8,7 @@ import { uploadMedia } from "../services/mediaUpload";
 import { encodeMediaMessage, type LyraMediaKind } from "../services/mediaMessage";
 import { makeReply, type ReplyReference } from "../services/messageInteractions";
 import type { AppDispatch, RootState } from "../store/store";
+import { readDraft, saveDraft } from "../services/conversationStorage.ts";
 
 type MessageInputProps = {
   chatId: string;
@@ -15,12 +16,23 @@ type MessageInputProps = {
   onMessageSent?: () => void;
   isGroup?: boolean;
   replyTo?: ReplyReference | null;
+  mentionRequest?: {id:number;text:string}|null;
   onCancelReply?: () => void;
 };
 
-export default function MessageInput({ chatId, currentUserId, onMessageSent, isGroup = false, replyTo, onCancelReply }: MessageInputProps) {
-  const [content, setContent] = useState("");
+export default function MessageInput({ chatId, currentUserId, onMessageSent, isGroup = false, replyTo, mentionRequest, onCancelReply }: MessageInputProps) {
+  const [content, setContent] = useState(() => readDraft(currentUserId, chatId));
+  // Tự động lưu bản nháp theo tài khoản/hội thoại ngay khi nội dung thay đổi.
+  useEffect(() => saveDraft(currentUserId, chatId, content), [currentUserId, chatId, content]);
   const [sending, setSending] = useState(false);
+  const [inputError, setInputError] = useState('');
+  const appliedMention = useRef<number | null>(null);
+  useEffect(() => {
+    if (!mentionRequest || appliedMention.current === mentionRequest.id) return;
+    appliedMention.current = mentionRequest.id;
+    setContent(previous => `${previous}${previous && !/\s$/.test(previous) ? ' ' : ''}${mentionRequest.text}`);
+    inputRef.current?.focus();
+  }, [mentionRequest]);
   const sendingGroupRef = useRef(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -65,6 +77,7 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
   }, [mediaMenuOpen]);
 
   const insertEmoji = (emoji: string) => {
+    setInputError('');
     const input = inputRef.current;
     const start = input?.selectionStart ?? content.length;
     const end = input?.selectionEnd ?? content.length;
@@ -123,8 +136,9 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setInputError('');
     try { await sendContent(replyTo ? makeReply(content, replyTo) : content, true); }
-    catch (error) { alert(error instanceof Error ? error.message : "Không gửi được tin nhắn."); }
+    catch (error) { setInputError(error instanceof Error ? error.message : "Không gửi được tin nhắn."); }
   };
 
   const chooseMedia = (kind: LyraMediaKind) => {
@@ -138,18 +152,40 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
   };
 
   const handleMediaFile = async (file?: File) => {
-    if (!file) return;
+    if (!file || uploading) return;
     setUploading(true);
     try {
       const media = await uploadMedia(file, selectedKind.current);
       await sendContent(encodeMediaMessage(media));
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Không gửi được tệp.");
+      setInputError(error instanceof Error ? error.message : "Không gửi được tệp.");
     } finally { setUploading(false); }
   };
 
+  const kindFromFile = (file: File): LyraMediaKind => file.type === 'image/gif' ? 'gif' :
+    file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : 'file';
+  const pasteMedia = (event: React.ClipboardEvent<HTMLInputElement>) => {
+    const file = event.clipboardData.files.item(0);
+    if (!file) return; // Giữ nguyên thao tác dán văn bản thông thường.
+    event.preventDefault();
+    selectedKind.current = kindFromFile(file);
+    void handleMediaFile(file);
+  };
+  const dropMedia = (event: React.DragEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const file = event.dataTransfer.files[0];
+    if (!file) return;
+    selectedKind.current = kindFromFile(file);
+    void handleMediaFile(file);
+  };
+
   return (
-      <form className={`message-input-container ${replyTo ? "has-reply" : ""}`} onSubmit={handleSubmit}>
+      <form className={`message-input-container ${replyTo ? "has-reply" : ""}`} onSubmit={handleSubmit}
+        onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={dropMedia}>
+        {inputError && <div className="lyra-composer-error" role="alert">
+          <span>{inputError}</span>
+          <button type="button" onClick={() => setInputError('')} aria-label="Đóng thông báo lỗi">×</button>
+        </div>}
         {replyTo && <div className="lyra-reply-composer" aria-label="Đang trả lời tin nhắn">
           <i className="bi bi-reply" aria-hidden="true" />
           <div><strong>Trả lời {replyTo.sender}</strong><span>{replyTo.excerpt}</span></div>
@@ -207,6 +243,7 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
             placeholder={"Nhập tin nhắn..."}
             value={content}
             onChange={(event) => setContent(event.target.value)}
+            onPaste={pasteMedia}
             aria-label={"Nội dung tin nhắn"}
         />
         <button className="send-button" type="submit" disabled={!content.trim() || uploading || sending}>

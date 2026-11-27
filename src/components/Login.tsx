@@ -2,9 +2,9 @@ import { useState, type FormEvent } from "react";
 import { useDispatch } from "react-redux";
 import type { AppDispatch } from "../store/store";
 import { loginAccount } from "../services/loginService.ts";
-import {setCredentials, setLoading, setAuthError, clearAuthError,} from "../features/auth/authSlice";
+import {setLoading, setAuthError, clearAuthError,} from "../features/auth/authSlice";
 
-type LoginProps = { onLogin: (userId: string, reLoginCode: string) => void; onRegister: () => void; };
+type LoginProps = { onLogin: (userId: string) => void; onRegister: () => void; };
 
 export function Login({ onLogin, onRegister }: LoginProps) {
   const dispatch = useDispatch<AppDispatch>();
@@ -44,8 +44,8 @@ export function Login({ onLogin, onRegister }: LoginProps) {
 
     try {
       const session = await loginAccount({ username: user, password });
-      dispatch(setCredentials({userId:session.username,reLoginCode:session.reLoginCode}));
-      onLogin(session.username, session.reLoginCode);
+      // SessionStore tự giữ RE_LOGIN_CODE trong sessionStorage; UI chỉ nhận username.
+      onLogin(session.username);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Không thể kết nối đến máy chủ. Vui lòng thử lại.";
       setError(message);

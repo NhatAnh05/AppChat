@@ -59,8 +59,19 @@ test('Parse duplicate room failure from teacher',()=>{
 test('Reject malformed success and ignore unrelated event',()=>{
   assert.equal(protocol.parseCreateRoomResponse('invalid'),null);
   assert.equal(protocol.parseCreateRoomResponse({event:'GET_USER_LIST',status:'success',data:[]}),null);
-  assert.match(protocol.parseCreateRoomResponse({event:'CREATE_ROOM',status:'success',data:{name:'ABC'}}).message,/không hợp lệ/);
-  assert.match(protocol.parseCreateRoomResponse({event:'CREATE_ROOM',status:'success',data:{name:'ABC',user:[{id:'wrong',name:'a'}],chatMess:[]}}).message,/không hợp lệ/);
+  assert.match(protocol.parseCreateRoomResponse({event:'CREATE_ROOM',status:'success',data:{name:'ABC'}}).message,/data\.user/);
+  assert.match(protocol.parseCreateRoomResponse({event:'CREATE_ROOM',status:'success',data:{name:'ABC',user:[{id:'wrong',name:'a'}],chatMess:[]}}).message,/data\.user\[0\]\.id/);
+});
+test('Malformed CREATE_ROOM success shows the exact violated field, without creating a fake room',()=>{
+  const frame = (data) => ({event:'CREATE_ROOM',status:'success',data});
+  assert.match(protocol.parseCreateRoomResponse(frame(null)).message,/CREATE_ROOM: data không phải đối tượng/);
+  assert.match(protocol.parseCreateRoomResponse(frame({user:[],chatMess:[]})).message,/data\.name/);
+  assert.match(protocol.parseCreateRoomResponse(frame({name:'A',user:'author',chatMess:[]})).message,/data\.user/);
+  assert.match(protocol.parseCreateRoomResponse(frame({name:'A',user:[],chatMess:null})).message,/data\.chatMess/);
+  assert.match(protocol.parseCreateRoomResponse(frame({name:'A',user:[null],chatMess:[]})).message,/data\.user\[0\]/);
+  assert.match(protocol.parseCreateRoomResponse(frame({name:'A',user:[{id:1}],chatMess:[]})).message,/data\.user\[0\]\.name/);
+  assert.deepEqual(protocol.parseCreateRoomResponse({event:'CREATE_ROOM',status:'error',mes:'Room Exist or Error'}),
+    {status:'error',message:'Room Exist or Error'});
 });
 test('CREATE_ROOM reuses LOGIN authenticated socket and waits for real ACK',async()=>{
   const socket=await loggedIn();
@@ -92,7 +103,7 @@ test('Invalid success cannot create phantom room',async()=>{
   const socket=await loggedIn();
   const p=createRoom('ABC');await tick();
   socket.receive({event:'CREATE_ROOM',status:'success',data:{name:'ABC',user:[],chatMess:'not an array'}});
-  await assert.rejects(p,/không hợp lệ/);
+  await assert.rejects(p,/data\.chatMess/);
   disconnectLoginSession();
 });
 test('Unrelated CREATE_ROOM success is ignored until response name matches',async()=>{

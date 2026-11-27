@@ -33,9 +33,10 @@ test('Stage1: queue shares one request channel for people and group histories',a
   await tick();
   const roomPromise=getRoomHistory('Team',1);
   await tick();
-  const outgoing=()=>socket.sent.filter(value=>value.data.event==='CHAT_PEOPLE_GET_MES');
+  const outgoing=()=>socket.sent.filter(value=>['CHAT_PEOPLE_GET_MES', 'GET_PEOPLE_CHAT_MES', 'GET_ROOM_CHAT_MES'].includes(value.data.event));
   assert.equal(outgoing().length,1);
   assert.equal(outgoing()[0].data.data.name,'alice');
+  assert.equal(outgoing()[0].data.event, 'GET_PEOPLE_CHAT_MES'); // API production đã xác nhận
   // A room payload must NOT resolve a personal history request.
   socket.receive({event:'CHAT_PEOPLE_GET_MES',status:'success',data:room});
   await tick();
@@ -45,6 +46,7 @@ test('Stage1: queue shares one request channel for people and group histories',a
   await tick();
   assert.equal(outgoing().length,2);
   assert.equal(outgoing()[1].data.data.name,'Team');
+  assert.equal(outgoing()[1].data.event, 'CHAT_PEOPLE_GET_MES'); // API mục 11
   socket.receive({event:'CHAT_PEOPLE_GET_MES',status:'success',data:room});
   assert.equal((await roomPromise).messages[0].content,'Chào nhóm');
   disconnectLoginSession();

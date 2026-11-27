@@ -8,6 +8,10 @@ import type { Chat } from '../types/chat'
 import type { ReplyReference } from '../services/messageInteractions'
 import { getRoomHistory, leaveRoom } from '../services/roomChatService.ts'
 import type { CreatedRoomMember } from '../services/createRoomProtocol.ts'
+import { readableGroupError } from '../services/groupManagement.ts'
+import { isHistoryUnsupported } from '../services/chatHistoryTransport.ts'
+import { normalizeSearch } from '../services/messageWorkspace.ts'
+import { HISTORY_REFRESH_MS } from '../services/chatRefreshPolicy.ts'
 
 type ChatWindowProps = {
     chat: Chat | null
@@ -22,48 +26,81 @@ type ChatWindowProps = {
 export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLeft, onCheckPresence, presenceError, presenceChecking}: ChatWindowProps) {
     const dispatch = useDispatch<AppDispatch>()
     const [detailOpen, setDetailOpen] = useState(false)
+    const [toolsOpen, setToolsOpen] = useState(false)
     const [members, setMembers] = useState<CreatedRoomMember[]>([])
+    const [memberQuery, setMemberQuery] = useState('')
+    const [groupFeedback, setGroupFeedback] = useState('')
+    const [mentionRequest, setMentionRequest] = useState<{id:number;text:string}|null>(null)
     const [roomError, setRoomError] = useState('')
     const [leaveBusy, setLeaveBusy] = useState(false)
+    const [leaveConfirm, setLeaveConfirm] = useState(false)
+    const [membersLoading, setMembersLoading] = useState(false)
     const [replyTo, setReplyTo] = useState<ReplyReference | null>(null)
     const [callMode, setCallMode] = useState<"voice" | "video" | null>(null)
-
-    useEffect(() => { setReplyTo(null) }, [chat?.id])
 
     useEffect(() => {
         if (!chat) return
         void dispatch(chat.kind === 'group' ? fetchRoomChatHistory({username:chat.name,chatId:chat.id,page:1}) : fetchPeopleChatHistory({username: chat.name, chatId: chat.id, page: 1}))
     }, [chat?.id, chat?.kind, chat?.name, dispatch])
 
-    // WebSocket của API có thể không đẩy SEND_CHAT đến người nhận.
-    // Chỉ đồng bộ hội thoại đang mở, thưa hơn để giảm nghẽn request history.
+    // Nhận tin mới qua SEND_CHAT. Đồng bộ dự phòng chỉ một lần/phút, KHÔNG gọi
+    // thêm mỗi lần cửa sổ focus (Edge thường phát sinh rất nhiều focus events).
     useEffect(() => {
         if (!chat) return;
         const refresh = () => {
-            if (document.visibilityState === 'visible' && navigator.onLine) {
-                void dispatch(chat.kind === 'group' ? fetchRoomChatHistory({username:chat.name,chatId:chat.id,page:1,force:true}) : fetchPeopleChatHistory({username: chat.name, chatId: chat.id, page: 1, force: true}));
-            }
+            if (isHistoryUnsupported(chat.kind === 'group' ? 'room' : 'people') ||
+                document.visibilityState !== 'visible' || !navigator.onLine || !document.hasFocus()) return;
+            void dispatch(chat.kind === 'group'
+                ? fetchRoomChatHistory({username: chat.name, chatId: chat.id, page: 1, force: true})
+                : fetchPeopleChatHistory({username: chat.name, chatId: chat.id, page: 1, force: true}));
         };
-        const interval = window.setInterval(refresh, 10000);
-        window.addEventListener('focus', refresh);
-        return () => { window.clearInterval(interval); window.removeEventListener('focus', refresh); };
+        const interval = window.setInterval(refresh, HISTORY_REFRESH_MS);
+        return () => window.clearInterval(interval);
     }, [chat?.id, chat?.kind, chat?.name, dispatch]);
 
     const openDetails = async () => {
         setDetailOpen(true);
         setRoomError('');
         setMembers([]);
+        setMemberQuery('');
+        setGroupFeedback('');
+        setLeaveConfirm(false);
         if (chat?.kind === 'group') {
-            try { const {room} = await getRoomHistory(chat.name, 1); setMembers(room.user); }
-            catch (error) { setRoomError(error instanceof Error ? error.message : 'Không tải được thành viên.'); }
+            setMembersLoading(true);
+            try {
+                const {room} = await getRoomHistory(chat.name, 1);
+                setMembers(room.user);
+            } catch (error) {
+                setRoomError(readableGroupError(error));
+            } finally {
+                setMembersLoading(false);
+            }
         }
     };
+    const copyGroupName = async () => {
+        if (!chat || chat.kind !== 'group') return;
+        try {
+            await navigator.clipboard.writeText(chat.name);
+            setGroupFeedback('Đã sao chép tên nhóm. Người khác có thể nhập tên này ở mục Tham gia nhóm.');
+        } catch {
+            setGroupFeedback('Không sao chép được. Bạn có thể chọn và sao chép tên phòng ở phía trên.');
+        }
+    };
+    const filteredMembers = members.filter(member => normalizeSearch(member.name).includes(normalizeSearch(memberQuery)));
     const handleLeave = async () => {
-        if (!chat || leaveBusy) return;
-        setLeaveBusy(true); setRoomError('');
-        try { await leaveRoom(chat.name); setDetailOpen(false); onRoomLeft?.(chat.name); }
-        catch (error) { setRoomError(error instanceof Error ? error.message : 'Không thể rời nhóm.'); }
-        finally { setLeaveBusy(false); }
+        if (!chat || chat.kind !== 'group' || leaveBusy || !leaveConfirm) return;
+        setLeaveBusy(true);
+        setRoomError('');
+        try {
+            await leaveRoom(chat.name);
+            setDetailOpen(false);
+            setLeaveConfirm(false);
+            onRoomLeft?.(chat.name);
+        } catch (error) {
+            setRoomError(readableGroupError(error));
+        } finally {
+            setLeaveBusy(false);
+        }
     };
 
     if (!chat) {
@@ -91,6 +128,7 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
                     {chat.kind === 'people' && presenceError && <small role="status" title={presenceError} style={{color:'#b45309',fontSize:'11px'}}>Không kiểm tra được: {presenceError}</small>}
                 </div>
                 <div className="chat-header-actions">
+                    <button type="button" className="chat-tools-trigger" title="Công cụ tin nhắn" aria-label="Mở công cụ tin nhắn" aria-expanded={toolsOpen} onClick={() => setToolsOpen(old => !old)}><i className="bi bi-sliders" /> <span>Công cụ</span></button>
                     {chat.kind === 'people' && <button type="button" aria-label="Kiểm tra trạng thái hoạt động" title="Kiểm tra online ngay và xem lỗi nếu API không phản hồi" disabled={presenceChecking} onClick={() => void onCheckPresence?.(chat.id)}><i className={`bi bi-${presenceChecking ? 'hourglass-split' : 'arrow-clockwise'}`} /></button>}
                     <button type="button" title="Gọi thoại" aria-label="Gọi thoại" onClick={() => setCallMode("voice")}><i className="bi bi-telephone" /></button>
                     <button type="button" title="Gọi video" aria-label="Gọi video" onClick={() => setCallMode("video")}><i className="bi bi-camera-video" /></button>
@@ -106,12 +144,53 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
                     <h2>{chat.name}</h2><span className="lyra-detail-status">{chat.kind === "group" ? "Nhóm trò chuyện" : chat.online === true ? "Đang hoạt động" : chat.online === false ? "Ngoại tuyến" : "Chưa rõ trạng thái"}</span>
                     <div className="lyra-detail-info"><i className="bi bi-at" /><div><small>{chat.kind === "group" ? "Tên phòng" : "Tên tài khoản"}</small><strong>{chat.name}</strong></div></div>
                     <div className="lyra-detail-info"><i className="bi bi-shield-check" /><div><small>Thông tin tài khoản</small><span>Hồ sơ chỉ hiển thị dữ liệu máy chủ cung cấp</span></div></div>
-                    {chat.kind === 'group' && <section className="lyra-group-members"><h3>Thành viên ({members.length})</h3>
-                        {members.map(member => <div key={member.id}>{member.name}</div>)}
+                    {chat.kind === 'group' && <section className="lyra-group-members">
+                        <div className="lyra-group-detail-heading">
+                            <h3>Thành viên {membersLoading ? '' : `(${members.length})`}</h3>
+                            <button type="button" disabled={membersLoading} onClick={() => { void openDetails(); }}>
+                                <i className="bi bi-arrow-clockwise" /> Làm mới
+                            </button>
+                        </div>
+                        {membersLoading && <p className="lyra-small-note" role="status">Đang tải thành viên từ máy chủ...</p>}
+                        {!membersLoading && !roomError && members.length === 0 && <p className="lyra-small-note">Chưa có dữ liệu thành viên.</p>}
+                        <div className="lyra-group-invitation">
+                            <button type="button" onClick={() => {void copyGroupName();}}><i className="bi bi-clipboard" /> Sao chép tên nhóm để mời</button>
+                            <small>Mời bằng tên phòng có sẵn của API, không tạo link hoặc API thêm người giả.</small>
+                        </div>
+                        {groupFeedback && <p className="lyra-small-note" role="status">{groupFeedback}</p>}
+                        <label className="lyra-group-member-search"><i className="bi bi-search" aria-hidden="true" />
+                            <input type="search" value={memberQuery} onChange={event => setMemberQuery(event.target.value)} placeholder="Tìm thành viên..." aria-label="Tìm thành viên nhóm" />
+                        </label>
+                        <div className="lyra-group-member-list">
+                            {filteredMembers.map(member => <div key={member.id} className="lyra-group-member">
+                                <span className="lyra-group-member-avatar">{member.name.slice(0, 2).toUpperCase()}</span>
+                                <span>{member.name}</span>
+                                <button type="button" className="lyra-group-mention" title={`Nhắc ${member.name} trong tin nhắn`} onClick={() => {
+                                    setMentionRequest({id:Date.now(), text:`@${member.name} `});
+                                    setDetailOpen(false);
+                                }}><i className="bi bi-at" /> Nhắc tên</button>
+                            </div>)}
+                        </div>
+                        {!membersLoading && !roomError && members.length > 0 && filteredMembers.length === 0 && <p className="lyra-small-note">Không tìm thấy thành viên.</p>}
                         {roomError && <p role="alert" className="login-error">{roomError}</p>}
-                        <button type="button" className="lyra-main-action" disabled={leaveBusy} onClick={() => void handleLeave()}>
-                            {leaveBusy ? 'Đang rời nhóm...' : 'Rời nhóm (OUT_ROOM)'}
-                        </button><p className="lyra-small-note">Chủ phòng không được tự rời nhóm; Backend sẽ trả lỗi.</p></section>}
+                        {!leaveConfirm ? (
+                            <button type="button" className="lyra-group-leave-trigger" onClick={() => { setRoomError(''); setLeaveConfirm(true); }}>
+                                <i className="bi bi-box-arrow-right" /> Rời nhóm
+                            </button>
+                        ) : (
+                            <div className="lyra-group-leave-confirm">
+                                <strong>Bạn chắc chắn muốn rời nhóm?</strong>
+                                <p>Chỉ xóa nhóm khỏi danh sách nếu máy chủ xác nhận OUT_ROOM thành công.</p>
+                                <div>
+                                    <button type="button" disabled={leaveBusy} onClick={() => { setLeaveConfirm(false); setRoomError(''); }}>Hủy</button>
+                                    <button type="button" disabled={leaveBusy} onClick={() => { void handleLeave(); }}>
+                                        {leaveBusy ? 'Đang rời nhóm...' : 'Xác nhận rời nhóm'}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                        <p className="lyra-small-note">Nếu bạn là chủ phòng, máy chủ có thể từ chối yêu cầu rời nhóm.</p>
+                    </section>}
                     <button className="lyra-main-action" onClick={() => setDetailOpen(false)}><i className="bi bi-chat-dots" /> Quay lại trò chuyện</button>
                 </section>
             </div>}
@@ -126,18 +205,23 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
             </div>}
 
             <MessageList
+                key={`${currentUserId}:${chat.id}`}
                 chatId={chat.id}
                 currentUserId={currentUserId}
                 username={chat.name}
                 isPeopleChat={chat.kind === 'people'}
                 onReply={setReplyTo}
+                toolsOpen={toolsOpen}
+                onCloseTools={() => setToolsOpen(false)}
             />
 
             <MessageInput
+                key={`${currentUserId}:${chat.id}`}
                 chatId={chat.id}
                 currentUserId={currentUserId}
                 isGroup={chat.kind === 'group'}
                 replyTo={replyTo}
+                mentionRequest={mentionRequest}
                 onCancelReply={() => setReplyTo(null)}
                 onMessageSent={onMessageSent}
             />

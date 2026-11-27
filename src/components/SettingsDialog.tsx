@@ -22,6 +22,16 @@ export function SettingsDialog({theme, onThemeChange, onLogout, onClose}: Settin
     try {localStorage.setItem(storageKey, JSON.stringify(profile));window.dispatchEvent(new Event("lyra-profile-update"));setMessage("Đã lưu thông tin trên trình duyệt này.");}
     catch {setMessage("Không đủ dung lượng để lưu. Hãy chọn ảnh nhỏ hơn.");}
   }
+  async function enableDesktopNotifications() {
+    if (typeof Notification === 'undefined') { setMessage('Trình duyệt không hỗ trợ thông báo hệ thống.'); return; }
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission === 'granted') {
+        update('notifications', true);
+        setMessage('Trình duyệt đã cấp quyền. Hãy bấm Lưu thay đổi để bật thông báo.');
+      } else setMessage('Trình duyệt chưa cấp quyền thông báo. Có thể đổi quyền trong phần cài đặt trang web.');
+    } catch {setMessage('Không thể yêu cầu quyền thông báo trên thiết bị này.');}
+  }
   async function chooseAvatar(file?: File) {
     if (!file) return;
     if (!['image/png','image/jpeg','image/webp','image/gif'].includes(file.type)) {setMessage("Chỉ hỗ trợ ảnh JPG, PNG, WEBP hoặc GIF.");return;}
@@ -48,7 +58,7 @@ export function SettingsDialog({theme, onThemeChange, onLogout, onClose}: Settin
           <div className="lyra-profile-fields"><h3>Thông tin cơ bản</h3><p>Những thông tin bạn muốn hiển thị trên thiết bị này.</p><div className="lyra-field-grid"><label>Tên hiển thị<input value={profile.displayName} maxLength={40} onChange={e=>update('displayName',e.target.value)} placeholder="Tên hiển thị"/></label><label>Tên đăng nhập<input disabled value={username}/></label><label className="full">Giới thiệu bản thân<textarea rows={4} maxLength={200} value={profile.bio} onChange={e=>update('bio',e.target.value)} placeholder="Viết đôi dòng giới thiệu về bạn..."/></label><label>Email liên hệ<input type="email" maxLength={100} value={profile.email} onChange={e=>update('email',e.target.value)} placeholder="email@example.com"/></label><label>Số điện thoại<input type="tel" maxLength={20} value={profile.phone} onChange={e=>update('phone',e.target.value)} placeholder="Số điện thoại"/></label><label className="full">Khu vực<input maxLength={100} value={profile.location} onChange={e=>update('location',e.target.value)} placeholder="Tỉnh / Thành phố"/></label></div></div>
         </>}
         {tab==='appearance' && <div className="lyra-settings-card"><h2>Giao diện</h2><p>Lựa chọn chế độ hiển thị phù hợp.</p><div className="lyra-appearance-choices"><button className={`lyra-appearance-choice ${theme==='light'?'selected':''}`} onClick={()=>onThemeChange('light')}><span className="lyra-theme-mini light"><i/><i/><i/></span><strong><i className="bi bi-sun"/> Chế độ sáng</strong><small>Nền sáng, dễ quan sát</small></button><button className={`lyra-appearance-choice ${theme==='dark'?'selected':''}`} onClick={()=>onThemeChange('dark')}><span className="lyra-theme-mini dark"><i/><i/><i/></span><strong><i className="bi bi-moon-stars"/> Chế độ tối</strong><small>Dịu mắt khi dùng ban đêm</small></button></div></div>}
-        {tab==='privacy' && <div className="lyra-settings-card"><h2>Quyền riêng tư và thông báo</h2><p>Các tùy chọn được lưu trên trình duyệt, chưa được máy chủ áp dụng.</p><label className="lyra-preference"><span><strong>Ưu tiên thông báo</strong><small>Ghi nhớ lựa chọn thông báo của bạn</small></span><input type="checkbox" checked={profile.notifications} onChange={e=>update('notifications',e.target.checked)}/></label><label className="lyra-preference"><span><strong>Hiển thị trạng thái trực tuyến</strong><small>Chỉ lưu tùy chọn, chưa thay đổi trạng thái trên server</small></span><input type="checkbox" checked={profile.showOnline} onChange={e=>update('showOnline',e.target.checked)}/></label></div>}
+        {tab==='privacy' && <div className="lyra-settings-card"><h2>Quyền riêng tư và thông báo</h2><p>Các tùy chọn được lưu trên trình duyệt, chưa được máy chủ áp dụng.</p><label className="lyra-preference"><span><strong>Ưu tiên thông báo</strong><small>Thông báo khi nhận tin mới và ứng dụng đang ở nền, chỉ sau khi bạn cấp quyền</small></span><input type="checkbox" checked={profile.notifications} onChange={e=>update('notifications',e.target.checked)}/></label><button type="button" className="lyra-desktop-permission" onClick={() => {void enableDesktopNotifications();}}><i className="bi bi-bell"/> Cấp quyền thông báo trên thiết bị</button><label className="lyra-preference"><span><strong>Hiển thị trạng thái trực tuyến</strong><small>Chỉ lưu tùy chọn, chưa thay đổi trạng thái trên server</small></span><input type="checkbox" checked={profile.showOnline} onChange={e=>update('showOnline',e.target.checked)}/></label></div>}
         {tab!=='appearance' && <div className="lyra-settings-bottom"><p>Thông tin và ảnh đại diện chỉ được lưu tại trình duyệt này, chưa cập nhật lên API của thầy hoặc thiết bị khác.</p><div>{message && <span role="status">{message}</span>}<button className="lyra-settings-save" disabled={!profile.displayName.trim()} onClick={save}><i className="bi bi-check2-circle"/> Lưu thay đổi</button></div></div>}
       </div>
     </div>
