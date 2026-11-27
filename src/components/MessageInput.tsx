@@ -214,6 +214,12 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
               </div>
           )}
         </div>
+        <button type="button" className="quick-action-button" title="Gửi hình ảnh" aria-label="Gửi hình ảnh" disabled={uploading} onClick={() => chooseMedia("image")}>
+          <i className="bi bi-image" aria-hidden="true" />
+        </button>
+        <button type="button" className="quick-action-button" title="Đính kèm tệp" aria-label="Đính kèm tệp" disabled={uploading} onClick={() => chooseMedia("file")}>
+          <i className="bi bi-paperclip" aria-hidden="true" />
+        </button>
         <div className="emoji-picker-anchor" ref={emojiPanelRef}>
           <button
               type="button"
@@ -246,6 +252,9 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
             onPaste={pasteMedia}
             aria-label={"Nội dung tin nhắn"}
         />
+        <button type="button" className="voice-action-button" title="Ghi âm" aria-label="Ghi âm">
+          <i className="bi bi-mic" aria-hidden="true" />
+        </button>
         <button className="send-button" type="submit" disabled={!content.trim() || uploading || sending}>
           {uploading ? "Đang tải..." : sending ? "Đang gửi..." : "Gửi"}
         </button>

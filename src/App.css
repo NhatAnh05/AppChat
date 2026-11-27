@@ -982,37 +982,735 @@
 .lyra-tools-modal-backdrop.theme-dark .lyra-tools-dialog { background:#15251f; border-color:#3a5b4c; color:#d7f2e0; }
 .lyra-tools-modal-backdrop.theme-dark .lyra-tools-dialog-header button { background:#294336; color:#dbf3e4; }
 
-/* Chỉ hiện một trạng thái trung tâm khi cuộc trò chuyện chưa có tin. */
-.lyra-conversation-content > .message-list > .history-status-centered {
-  box-sizing: border-box;
-  min-height: calc(100% - 8px);
-  width: 100%;
-  max-width: 640px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  gap: 12px;
-  text-align: center;
-  line-height: 1.6;
-  padding: 28px;
+/* ===== LyraChat redesign inspired by provided mockups ===== */
+.app-shell.lyra-workspace {
+  background: #f4f7f8;
+  min-height: 100vh;
 }
 
-/* WebRTC voice / video calls */
-.lyra-call-overlay {z-index: 1200;}
-.lyra-live-call {width:min(95vw,680px);max-height:90vh;overflow:auto;padding:26px;border-radius:20px;background:#fff;box-shadow:0 25px 80px #0005;color:#173d37;text-align:center;}
-.lyra-live-head h2 {margin:10px 0 4px;font-size:23px;}
-.lyra-live-head p {margin:0 0 20px;color:#667b79;}
-.lyra-call-avatar {width:76px;height:76px;display:grid;place-items:center;border-radius:50%;background:#2c917f;color:#fff;font-weight:700;font-size:23px;margin:0 auto;}
-.lyra-call-videos {height:min(44vh,340px);background:#142b2e;position:relative;border-radius:12px;overflow:hidden;margin-bottom:16px;}
-.lyra-remote-video {height:100%;width:100%;object-fit:contain;}
-.lyra-local-video {position:absolute;right:12px;bottom:12px;width:25%;height:38%;object-fit:cover;transform:scaleX(-1);border-radius:10px;border:2px solid #fff;background:#2d4146;}
-.lyra-call-controls {display:flex;gap:12px;justify-content:center;flex-wrap:wrap;}
-.lyra-call-controls button {padding:12px 18px;border-radius:26px;border:1px solid #dae5e2;background:#eff7f5;color:#185b4d;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:7px;}
-.lyra-call-controls button:disabled {opacity:.45;cursor:not-allowed;}
-.lyra-call-controls .lyra-call-danger {background:#df4a52;border-color:#df4a52;color:white;}
-.lyra-call-controls .lyra-call-accept {background:#167c62;border-color:#167c62;color:white;}
-.lyra-call-toast {position:fixed;bottom:78px;right:22px;z-index:1300;background:#173f39;color:white;border-radius:12px;padding:12px 15px;box-shadow:0 7px 22px #0003;display:flex;align-items:center;gap:15px;max-width:min(440px,94vw);}
-.lyra-call-toast button {border:0;background:transparent;color:white;cursor:pointer;font-size:19px;}
-.lyra-call-connection {position:fixed;bottom:5px;right:16px;z-index:100;color:#a33;font-size:11px;pointer-events:none;}
+.lyra-workspace {
+  grid-template-columns: 265px 380px minmax(0, 1fr);
+  background: #f4f7f8;
+}
+
+.lyra-workspace .sidebar {
+  position: relative;
+  padding: 28px 18px 18px;
+  background:
+    radial-gradient(circle at 20% 85%, rgba(41,146,122,.30), transparent 22%),
+    radial-gradient(circle at 85% 14%, rgba(28,185,161,.18), transparent 20%),
+    linear-gradient(180deg, #063838 0%, #0a1f2e 100%) !important;
+  color: #fff;
+  border-right: 1px solid rgba(255,255,255,.06);
+}
+
+.lyra-workspace .brand {
+  gap: 14px;
+  margin-bottom: 26px;
+}
+
+.lyra-workspace .brand .lyra-logo {
+  width: 28px;
+  height: 28px;
+}
+
+.lyra-workspace .brand span {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -.03em;
+}
+
+.lyra-workspace .sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lyra-workspace .nav-item {
+  position: relative;
+  min-height: 56px;
+  justify-content: flex-start;
+  gap: 14px;
+  padding: 0 18px;
+  border-radius: 18px;
+  background: transparent;
+  color: rgba(255,255,255,.92);
+  font-weight: 700;
+  font-size: 15px;
+  border: 1px solid transparent;
+}
+
+.lyra-workspace .nav-item svg {
+  width: 22px;
+  height: 22px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+}
+
+.lyra-workspace .nav-item.is-active {
+  background: linear-gradient(90deg, rgba(85,211,182,.28), rgba(84,160,144,.22));
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(170,241,223,.14);
+}
+
+.lyra-workspace .nav-item:hover {
+  background: rgba(255,255,255,.06);
+}
+
+.lyra-workspace .user-profile {
+  margin-top: auto;
+  padding-top: 22px;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+
+.lyra-workspace .profile-avatar.lyra-avatar-button,
+.lyra-workspace .profile-avatar {
+  width: 54px;
+  height: 54px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #0f766e, #1ea28c);
+  color: #fff;
+  font-weight: 800;
+  border: 2px solid rgba(255,255,255,.16);
+}
+
+.lyra-workspace .profile-copy strong {
+  color: #fff;
+  font-size: 15px;
+}
+
+.lyra-workspace .lyra-profile-name-button span,
+.lyra-workspace .profile-copy span {
+  color: #93dac7;
+}
+
+.lyra-workspace .more-button {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255,255,255,.08);
+  color: #fff;
+}
+
+.lyra-workspace .chat-list-panel,
+.lyra-workspace .conversation-panel,
+.lyra-workspace .settings-dialog,
+.lyra-workspace .contact-directory {
+  background: linear-gradient(180deg, #f9fbfb 0%, #f4f7f8 100%);
+}
+
+.lyra-workspace .chat-list-panel {
+  border-right: 1px solid #e7eded;
+  padding: 26px 20px 18px;
+}
+
+.lyra-workspace .chat-list-header {
+  padding: 0;
+  gap: 18px;
+}
+
+.lyra-workspace .list-title-row {
+  align-items: center;
+}
+
+.lyra-workspace .list-title-row h1 {
+  margin: 0;
+  color: #11283a;
+  font-size: 25px;
+  font-weight: 800;
+  letter-spacing: -.03em;
+}
+
+.lyra-workspace .compose-button {
+  width: 52px;
+  height: 52px;
+  border-radius: 18px;
+  border: 0;
+  background: linear-gradient(180deg, #0d6c5a, #0f5e52);
+  color: #fff;
+  box-shadow: 0 12px 24px rgba(13, 108, 90, .18);
+}
+
+.lyra-workspace .chat-search-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.lyra-workspace .search-box {
+  flex: 1;
+  height: 52px;
+  border-radius: 18px;
+  background: #eff3f3;
+  border: 1px solid #e3eceb;
+  padding-inline: 16px;
+}
+
+.lyra-workspace .search-box svg {
+  width: 18px;
+  height: 18px;
+  stroke: #7a8b98;
+}
+
+.lyra-workspace .search-box input {
+  color: #213547;
+  font-size: 15px;
+}
+
+.lyra-workspace .filter-toggle-button {
+  width: 52px;
+  height: 52px;
+  border-radius: 18px;
+  border: 1px solid #e3eceb;
+  background: #f2f6f5;
+  color: #305968;
+  font-size: 18px;
+}
+
+.lyra-workspace .chat-filters {
+  gap: 10px;
+  padding-bottom: 0;
+  border-bottom: 0;
+  flex-wrap: wrap;
+}
+
+.lyra-workspace .chat-filters button {
+  position: relative;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 0;
+  background: transparent;
+  color: #41586a;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.lyra-workspace .chat-filters button.active {
+  background: #0f6f5d;
+  color: #fff;
+}
+
+.lyra-workspace .chat-filters .filter-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #1fa47d;
+}
+
+.lyra-workspace .chat-items {
+  margin-top: 14px;
+  padding-right: 6px;
+}
+
+.lyra-workspace .chat-item {
+  min-height: 86px;
+  padding: 14px 14px;
+  border-radius: 18px;
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+.lyra-workspace .chat-item:hover {
+  background: #f4f8f8;
+}
+
+.lyra-workspace .chat-item.is-selected {
+  background: #dff0eb;
+  border-color: #d4e8e1;
+  box-shadow: 0 8px 20px rgba(26, 94, 82, .06);
+}
+
+.lyra-workspace .chat-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  font-size: 20px;
+  box-shadow: none;
+}
+
+.lyra-workspace .chat-copy strong {
+  color: #0f1f30;
+  font-size: 18px;
+}
+
+.lyra-workspace .chat-heading time,
+.lyra-workspace .chat-preview {
+  color: #667989;
+  font-size: 14px;
+}
+
+.lyra-workspace .unread-badge,
+.lyra-workspace .nav-unread-badge {
+  min-width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #0f7d62;
+  color: #fff;
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.lyra-workspace .chat-window {
+  background:
+    radial-gradient(circle at 95% 100%, rgba(93, 193, 175, .18), transparent 16%),
+    linear-gradient(180deg, #fbfdfd 0%, #f5f8f8 100%);
+}
+
+.lyra-workspace .chat-window-header {
+  min-height: 86px;
+  padding: 16px 18px;
+  background: rgba(255,255,255,.88);
+  backdrop-filter: blur(10px);
+}
+
+.lyra-workspace .chat-window-header .chat-avatar {
+  width: 54px;
+  height: 54px;
+  font-size: 20px;
+}
+
+.lyra-workspace .chat-header-info h2 {
+  margin: 0;
+  color: #11283a;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.lyra-workspace .chat-header-info span {
+  color: #6d7f8e;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.lyra-workspace .chat-header-actions {
+  gap: 10px;
+}
+
+.lyra-workspace .chat-circle-btn,
+.lyra-workspace .chat-tools-trigger,
+.lyra-workspace .chat-profile-btn {
+  height: 46px;
+  border-radius: 999px;
+  border: 1px solid #dde9e6;
+  background: #f5faf8;
+  color: #18614f;
+}
+
+.lyra-workspace .chat-circle-btn,
+.lyra-workspace .chat-tools-trigger {
+  width: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 18px;
+}
+
+.lyra-workspace .chat-profile-btn {
+  padding: 0 18px;
+  font-size: 14px;
+}
+
+.lyra-workspace .chat-profile-btn span {
+  font-weight: 700;
+}
+
+.lyra-workspace .message-list {
+  padding: 22px 26px 12px;
+}
+
+.lyra-workspace .message-row {
+  margin-bottom: 18px;
+}
+
+.lyra-workspace .message-bubble {
+  border-radius: 24px;
+  padding: 14px 16px;
+  box-shadow: 0 8px 20px rgba(35, 56, 74, .05);
+}
+
+.lyra-workspace .message-row.received .message-bubble {
+  background: #fff;
+  border: 1px solid #edf1f2;
+}
+
+.lyra-workspace .message-row.sent .message-bubble {
+  background: linear-gradient(135deg, #0f6b59, #105949);
+}
+
+.lyra-workspace .message-input-container {
+  margin: 0 18px 18px;
+  padding: 12px 14px;
+  border: 1px solid #dce8e3;
+  border-radius: 22px;
+  background: rgba(255,255,255,.9);
+  box-shadow: 0 12px 34px rgba(22, 63, 58, .08);
+}
+
+.lyra-workspace .media-plus-toggle,
+.lyra-workspace .emoji-toggle,
+.lyra-workspace .quick-action-button,
+.lyra-workspace .voice-action-button {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 0;
+  background: #e8f4ef;
+  color: #175f4d;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 19px;
+  cursor: pointer;
+}
+
+.lyra-workspace .quick-action-button:hover,
+.lyra-workspace .voice-action-button:hover,
+.lyra-workspace .emoji-toggle:hover,
+.lyra-workspace .media-plus-toggle:hover {
+  background: #d8ede5;
+}
+
+.lyra-workspace .message-input {
+  height: 50px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #d8e6e1;
+  padding-inline: 18px;
+  font-size: 16px;
+}
+
+.lyra-workspace .send-button {
+  min-width: 88px;
+  height: 48px;
+  border-radius: 16px;
+  border: 0;
+  background: linear-gradient(180deg, #0f6f5d, #0e5f52);
+  color: #fff;
+  font-weight: 800;
+  font-size: 16px;
+}
+
+.lyra-workspace .chat-window-empty {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.lyra-workspace .empty-chat-topbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 18px 22px 0;
+}
+
+.lyra-workspace .topbar-icon-button,
+.lyra-workspace .topbar-avatar-button {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1px solid #e4ece9;
+  background: rgba(255,255,255,.8);
+  color: #203747;
+}
+
+.lyra-workspace .topbar-avatar-button {
+  font-weight: 800;
+  color: #1a6f5d;
+  background: #e7f4f0;
+}
+
+.lyra-workspace .topbar-dot {
+  position: absolute;
+  top: 11px;
+  right: 11px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+}
+
+.lyra-workspace .hero-empty {
+  flex: 1;
+  gap: 20px;
+  justify-content: center;
+  text-align: center;
+  padding: 30px;
+}
+
+.lyra-workspace .empty-chat-illustration {
+  width: min(330px, 65%);
+  height: auto;
+  filter: drop-shadow(0 20px 32px rgba(32, 94, 80, .08));
+}
+
+.lyra-workspace .hero-empty h2 {
+  font-size: 54px;
+  line-height: 1.08;
+  letter-spacing: -.03em;
+  color: #10273a;
+  margin: 0;
+}
+
+.lyra-workspace .hero-empty p {
+  max-width: 520px;
+  margin: 0 auto;
+  color: #5f7484;
+  font-size: 18px;
+  line-height: 1.6;
+}
+
+.lyra-workspace .empty-chat-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 26px;
+  min-height: 56px;
+  border: 0;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #15936e, #0f735a);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 800;
+  box-shadow: 0 14px 28px rgba(21,147,110,.2);
+}
+
+.lyra-workspace .lyra-status-dock {
+  display: none;
+}
+
+.theme-dark.app-shell.lyra-workspace,
+.theme-dark .chat-list-panel,
+.theme-dark .conversation-panel {
+  background: #101b22;
+}
+
+.theme-dark .chat-list-panel,
+.theme-dark .conversation-panel {
+  border-color: rgba(255,255,255,.06);
+}
+
+.theme-dark .chat-window {
+  background: linear-gradient(180deg, #0e161c 0%, #122027 100%);
+}
+
+.theme-dark .chat-window-header,
+.theme-dark .message-input-container,
+.theme-dark .chat-item.is-selected {
+  background: rgba(21,31,39,.92);
+  border-color: rgba(255,255,255,.08);
+}
+
+.theme-dark .chat-header-info h2,
+.theme-dark .chat-copy strong,
+.theme-dark .list-title-row h1,
+.theme-dark .hero-empty h2 {
+  color: #eef7f4;
+}
+
+.theme-dark .chat-preview,
+.theme-dark .chat-heading time,
+.theme-dark .chat-header-info span,
+.theme-dark .hero-empty p {
+  color: #a2b5c1;
+}
+
+.theme-dark .search-box,
+.theme-dark .filter-toggle-button,
+.theme-dark .message-input,
+.theme-dark .topbar-icon-button,
+.theme-dark .topbar-avatar-button,
+.theme-dark .chat-circle-btn,
+.theme-dark .chat-profile-btn,
+.theme-dark .quick-action-button,
+.theme-dark .voice-action-button,
+.theme-dark .emoji-toggle,
+.theme-dark .media-plus-toggle {
+  background: #16242c;
+  border-color: rgba(255,255,255,.08);
+  color: #d5f2ea;
+}
+
+.theme-dark .message-row.received .message-bubble {
+  background: #16242c;
+  border-color: rgba(255,255,255,.08);
+}
+
+@media (max-width: 1200px) {
+  .lyra-workspace {
+    grid-template-columns: 230px 330px minmax(0, 1fr);
+  }
+  .lyra-workspace .hero-empty h2 {
+    font-size: 42px;
+  }
+}
+
+@media (max-width: 900px) {
+  .lyra-workspace {
+    grid-template-columns: 78px 320px minmax(0, 1fr);
+  }
+  .lyra-workspace .chat-list-panel {
+    padding-inline: 14px;
+  }
+}
+
+/* LyraChat layout / unread v2 – override previous legacy selectors */
+.lyra-workspace {
+  grid-template-columns: 250px 365px minmax(0,1fr);
+}
+.lyra-workspace .chat-list-panel { min-width:0; max-width:none; padding:0; overflow:hidden; }
+.lyra-workspace .chat-list-header { flex:0 0 auto; padding:25px 17px 13px; }
+.lyra-workspace .list-title-row { margin-bottom:18px; }
+.lyra-workspace .chat-filters { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:5px; flex-wrap:nowrap; width:100%; margin-top:14px; }
+.lyra-workspace .chat-filters button { display:inline-flex; align-items:center; justify-content:center; padding:0 5px; min-width:0; width:100%; font-size:12px; white-space:nowrap; height:38px; border-radius:15px; }
+.lyra-workspace .chat-items { flex:1; min-height:0; padding:0 10px 15px; overflow-y:auto; overflow-x:hidden; }
+.lyra-workspace .chat-item { gap:11px; min-height:78px; padding:10px 11px; }
+.lyra-workspace .chat-avatar { width:46px; height:46px; font-size:15px; }
+.lyra-workspace .chat-copy { min-width:0; gap:5px; }
+.lyra-workspace .chat-copy strong { font-size:14px; }
+.lyra-workspace .chat-heading time { font-size:11px; }
+.lyra-workspace .chat-preview { font-size:12px; }
+.lyra-workspace .unread-badge { flex:0 0 auto; align-self:center; min-width:24px; height:24px; padding:0 6px; border-radius:50px; }
+.lyra-workspace .chat-item:has(.unread-badge) .chat-heading strong { font-weight:800; }
+.lyra-workspace .chat-item:has(.unread-badge) .chat-preview { color:#1e564e; font-weight:700; }
+.lyra-workspace .conversation-panel { min-width:0; }
+.lyra-workspace .chat-window-empty { align-items:stretch; justify-content:flex-start; width:100%; height:100%; }
+.lyra-workspace .empty-chat-topbar { width:100%; flex:0 0 auto; }
+.lyra-workspace .hero-empty {
+  width:min(100%,680px); max-width:680px; min-width:0;
+  flex:1; margin:auto; padding:24px 28px 60px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:18px; text-align:center;
+}
+.lyra-workspace .hero-empty h2 { display:block; max-width:100%; margin:0; font-size:clamp(27px,3vw,38px); line-height:1.2; white-space:normal; letter-spacing:-.035em; }
+.lyra-workspace .hero-empty p { display:block; max-width:520px; margin:0; font-size:clamp(13px,1.25vw,16px); line-height:1.6; }
+.lyra-workspace .empty-chat-primary { max-width:100%; white-space:nowrap; min-height:52px; padding:0 23px; font-size:15px; line-height:1.2; cursor:pointer; }
+.lyra-workspace .lyra-empty-art { position:relative; flex:0 0 auto; width:min(285px,68%); aspect-ratio:1.7; margin:4px auto 10px; }
+.lyra-workspace .lyra-speech { position:absolute; display:flex; align-items:center; justify-content:center; gap:12px; border-radius:40px 40px 28px 28px; box-shadow:0 16px 24px rgba(7,84,72,.13); }
+.lyra-workspace .lyra-speech i { width:13px; height:13px; border-radius:50%; background:rgba(255,255,255,.96); }
+.lyra-workspace .lyra-speech.primary { left:10%; top:18%; width:57%; height:57%; background:linear-gradient(150deg,#2ca590,#065e56); }
+.lyra-workspace .lyra-speech.primary:after {content:'';position:absolute;bottom:-13px;left:22%;border:17px solid transparent;border-top-color:#08685f;border-right:0;transform:rotate(-15deg);}
+.lyra-workspace .lyra-speech.secondary { right:9%; bottom:7%; width:54%; height:48%; background:linear-gradient(150deg,#b8ebe1,#6acdb7); border:3px solid #e8fffa; }
+.lyra-workspace .lyra-speech.secondary i {background:#268e7b;}
+.lyra-workspace .lyra-speech.secondary:after {content:'';position:absolute;right:16%;bottom:-13px;border:16px solid transparent;border-top-color:#72d1bc;border-left:0;}
+.lyra-workspace .lyra-paper-plane { position:absolute; right:-3%; top:-4%; transform:rotate(20deg); color:#39a78f; font-size:36px; }
+.lyra-workspace .lyra-art-sparkle {position:absolute;left:1%;top:4%;color:#139679;font-size:28px;}
+.lyra-workspace .lyra-bell-button {position:relative;}
+.lyra-workspace .lyra-bell-dot {position:absolute;right:7px;top:6px;width:8px;height:8px;background:#ef4444;border:2px solid #fff;border-radius:50%;}
+.lyra-workspace .chat-header-actions { flex-wrap:nowrap; min-width:0; }
+.lyra-workspace .chat-tools-trigger { min-width:42px; height:42px; }
+.lyra-workspace .message-input-container { margin:0 12px 12px; min-width:0; gap:8px; }
+.lyra-workspace .message-input { min-width:0; flex:1; }
+.lyra-workspace .send-button { min-width:68px; padding-inline:12px; }
+.lyra-notification-center { padding:0; width:min(490px,calc(100vw - 32px)); overflow:hidden; }
+.lyra-notifications-heading {padding:22px 24px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e8efed;}
+.lyra-notifications-heading h2 {margin:0;font-size:21px;}
+.lyra-notifications-heading p {margin:6px 0 0;color:#6d7e88;font-size:13px;}
+.lyra-notifications-heading button {width:34px;height:34px;border:0;border-radius:50%;background:#eff4f2;color:#426258;cursor:pointer;}
+.lyra-notifications-list {max-height:min(55vh,440px);overflow:auto;padding:8px;}
+.lyra-notification-item {width:100%;display:flex;align-items:center;gap:12px;border:0;border-radius:13px;padding:13px;background:transparent;text-align:left;cursor:pointer;}
+.lyra-notification-item:hover {background:#eaf5f0;}
+.lyra-notification-avatar {width:43px;height:43px;flex-shrink:0;border-radius:50%;background:#3e9888;color:white;display:grid;place-items:center;font-weight:700;}
+.lyra-notification-copy {display:flex;flex:1;flex-direction:column;gap:5px;min-width:0;}
+.lyra-notification-copy strong {font-size:14px;color:#203f39;}
+.lyra-notification-copy small {font-size:12px;color:#64748b;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;}
+.lyra-notification-count {background:#0f8069;color:white;padding:5px 9px;border-radius:50px;font-size:12px;font-weight:800;}
+.lyra-notifications-empty {display:flex;flex-direction:column;align-items:center;gap:12px;padding:38px 15px;color:#647b79;}
+.lyra-notifications-empty i {font-size:33px;color:#429b86;}
+.lyra-notifications-note {margin:0;padding:13px 22px 18px;border-top:1px solid #e8efed;color:#708681;font-size:11px;line-height:1.5;}
+.theme-dark .lyra-notification-center {background:#192a2b;}
+.theme-dark .lyra-notifications-heading,.theme-dark .lyra-notifications-note {border-color:#36504b;}
+.theme-dark .lyra-notification-item:hover {background:#29433d;}
+.theme-dark .lyra-notification-copy strong {color:#e4f5ef;}
+@media(max-width:1280px){
+ .lyra-workspace {grid-template-columns:215px 315px minmax(0,1fr);}
+ .lyra-workspace .sidebar {padding-inline:11px;}
+ .lyra-workspace .chat-header-actions {gap:5px;}
+ .lyra-workspace .chat-header-actions .chat-circle-btn,.lyra-workspace .chat-header-actions .chat-tools-trigger {width:37px;min-width:37px;height:37px;padding:0;}
+ .lyra-workspace .chat-profile-btn {padding:0 10px;}
+}
+@media(max-width:1050px){
+ .lyra-workspace {grid-template-columns:70px 295px minmax(0,1fr);}
+ .lyra-workspace .chat-header-actions .chat-profile-btn span {display:none;}
+ .lyra-workspace .chat-header-actions .chat-profile-btn {min-width:37px;width:37px;padding:0;}
+ .lyra-workspace .quick-action-button {display:none;}
+}
+@media(max-width:700px){
+ .lyra-workspace {grid-template-columns:62px minmax(0,1fr);grid-template-rows:42vh 58vh;height:100dvh;}
+ .lyra-workspace .sidebar {grid-row:1/span 2;height:100%;}
+ .lyra-workspace .chat-list-panel {grid-column:2;height:42vh;}
+ .lyra-workspace .conversation-panel {grid-column:2;height:58vh;min-height:0;}
+ .lyra-workspace .hero-empty {padding:12px 12px 20px;gap:11px;}
+ .lyra-workspace .lyra-empty-art {width:130px;}
+ .lyra-workspace .hero-empty h2 {font-size:24px;}
+ .lyra-workspace .hero-empty p {font-size:12px;}
+ .lyra-workspace .empty-chat-primary {font-size:12px;min-height:40px;}
+}
+
+
+/* ===== LYRA TYPOGRAPHY: soft, readable Vietnamese type ===== */
+:root {
+  --lyra-font: "Nunito Sans", "Segoe UI", Arial, sans-serif;
+}
+body, #root, .app-shell,
+button, input, textarea, select {
+  font-family: var(--lyra-font);
+}
+body { letter-spacing: 0; }
+.lyra-workspace { font-family: var(--lyra-font); font-size: 14px; line-height: 1.48; }
+.lyra-workspace button, .lyra-workspace input, .lyra-workspace textarea {
+  font-family: inherit;
+  letter-spacing: 0;
+}
+/* Sidebar: balanced, rounded lettering */
+.lyra-workspace .brand span { font-family: var(--lyra-font); font-size: 22px; font-weight: 800; letter-spacing: -.55px; line-height: 1.2; }
+.lyra-workspace .nav-item { font-size: 14px; font-weight: 650; letter-spacing: 0; line-height: 1.3; }
+.lyra-workspace .profile-copy strong, .lyra-workspace .lyra-profile-name-button strong { font-size: 14px; font-weight: 750; letter-spacing: -.15px; }
+.lyra-workspace .profile-copy span, .lyra-workspace .lyra-profile-name-button span { font-size: 12px; font-weight: 500; }
+/* Conversation list: names distinct; previews relaxed */
+.lyra-workspace .list-title-row h1 { font-family: var(--lyra-font); font-size: 25px; font-weight: 800; line-height: 1.3; letter-spacing: -.65px; }
+.lyra-workspace .chat-heading strong { font-size: 15px; font-weight: 750; letter-spacing: -.2px; line-height: 1.4; }
+.lyra-workspace .chat-item:has(.unread-badge) .chat-heading strong { font-weight: 800; }
+.lyra-workspace .chat-preview { font-size: 13px; font-weight: 500; line-height: 1.45; }
+.lyra-workspace .chat-item:has(.unread-badge) .chat-preview { font-weight: 700; }
+.lyra-workspace .chat-heading time { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.lyra-workspace .chat-filters button { font-size: 13px; font-weight: 700; letter-spacing: -.1px; }
+.lyra-workspace .search-box input { font-size: 13px; font-weight: 500; }
+.lyra-workspace .search-box input::placeholder, .lyra-workspace .message-input::placeholder { font-weight: 500; opacity: 1; }
+.lyra-workspace .unread-badge { font-size: 12px; font-weight: 800; }
+/* Open chat */
+.lyra-workspace .chat-header-info h2 { font-size: 19px; font-weight: 800; letter-spacing: -.45px; line-height: 1.25; }
+.lyra-workspace .chat-header-info span { font-size: 12px; font-weight: 550; }
+.lyra-workspace .chat-profile-btn { font-size: 12px; font-weight: 750; }
+.lyra-workspace .message-bubble { font-size: 14px; font-weight: 500; line-height: 1.6; letter-spacing: .02px; overflow-wrap: anywhere; }
+.lyra-workspace .message-row.sent .message-bubble { font-weight: 550; }
+.lyra-workspace .message-input { font-size: 14px; font-weight: 500; line-height: 1.5; }
+.lyra-workspace .send-button { font-size: 14px; font-weight: 800; letter-spacing: -.1px; }
+/* Empty state: avoid large display text wrapping awkwardly */
+.lyra-workspace .hero-empty h2 { font-family: var(--lyra-font); font-size: clamp(27px, 3vw, 39px); font-weight: 800; letter-spacing: -.9px; line-height: 1.25; max-width: 100%; text-wrap: balance; }
+.lyra-workspace .hero-empty p { font-size: 15px; font-weight: 500; line-height: 1.75; max-width: 520px; text-wrap: pretty; }
+.lyra-workspace .empty-chat-primary { font-size: 14px; font-weight: 800; letter-spacing: -.1px; line-height: 1.4; white-space: nowrap; max-width: 100%; }
+/* Dialogs, settings, group management */
+.lyra-workspace .lyra-modal h2, .lyra-workspace .lyra-settings-top h1 { font-family: var(--lyra-font); font-weight: 800; letter-spacing: -.5px; }
+.lyra-workspace .lyra-settings-top h1 { font-size: 27px; }
+.lyra-workspace .lyra-settings-body, .lyra-workspace .lyra-detail-card, .lyra-workspace .lyra-notification-center { line-height: 1.55; }
+.lyra-workspace .lyra-notification-copy strong { font-size: 13px; font-weight: 750; }
+.lyra-workspace .lyra-notification-copy small { font-size: 12px; font-weight: 500; }
+.lyra-workspace .lyra-settings-tabs button, .lyra-workspace .lyra-main-action { font-weight: 750; }
+@media (max-width: 1100px) {
+  .lyra-workspace .hero-empty h2 { font-size: clamp(25px, 3vw, 33px); }
+  .lyra-workspace .hero-empty p { font-size: 13px; }
+  .lyra-workspace .chat-heading strong { font-size: 14px; }
+}
+@media (max-width: 700px) {
+  .lyra-workspace .hero-empty h2 { font-size: 25px; }
+  .lyra-workspace .hero-empty p { font-size: 12px; }
+  .lyra-workspace .empty-chat-primary { font-size: 12px; white-space: normal; }
+}

@@ -10,7 +10,6 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { Login } from "./components/Login";
 import { Register } from "./components/Register";
 import ChatWindow from "./components/ChatWindow";
-import CallOverlay from "./components/CallOverlay";
 import {clearCredentials, setCredentials,} from "./features/auth/authSlice";
 import { AuthInitializer } from "./features/auth/AuthInitializer";
 import { contactService } from "./services/contactService";
@@ -27,6 +26,9 @@ import type { Chat } from "./types/chat";
 import type { ContactEntry } from "./types/contact";
 import "./App.css";
 import { decodeChatContent } from "./services/chatContentCodec";
+import { mediaMessagePreview } from "./services/mediaMessage";
+import { messagePreview as legacyMediaPreview } from "./services/mediaMessages";
+import { parseInteraction, visibleMessageContent } from "./services/messageInteractions";
 import {userService} from "./services/userService.ts";
 import { notifyIncomingMessage } from "./services/desktopNotifications.ts";
 import { PRESENCE_REFRESH_MS } from "./services/chatRefreshPolicy.ts";
@@ -75,6 +77,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const [groupNotice, setGroupNotice] = useState("");
     const [logoutBusy, setLogoutBusy] = useState(false);
     const [apiLogOpen, setApiLogOpen] = useState(false);
+    const [notificationsOpen, setNotificationsOpen] = useState(false);
     const [apiLogs, setApiLogs] = useState<ApiLogEntry[]>([]);
     const apiLogBuffer = useRef<ApiLogEntry[]>([]);
     const [connectionStatus, setConnectionStatus] = useState<WebSocketState>(websocketService.getStatus());
@@ -123,8 +126,9 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const loadedChatIds = useMemo(() => Object.entries(historyByChat)
         .filter(([, history]) => history.loadedPages.includes(1) || Boolean(history.error))
         .map(([chatId]) => chatId), [historyByChat]);
-    const baselineReady = contactsInitialized && friends.every(friend => loadedChatIds.some(
-        id => id.toLowerCase() === friend.id.toLowerCase()));
+    // Mỗi hội thoại được baseline khi trang đầu tải xong; không chờ toàn bộ danh bạ.
+    // Nếu chờ tất cả bạn bè, unread có thể không khởi tạo vì chỉ chat đang mở được tải lịch sử.
+    const baselineReady = contactsInitialized && loadedChatIds.length > 0;
     useEffect(() => {
         const visible = document.visibilityState === 'visible' && document.hasFocus();
         setUnreadLedger(previous => reconcileUnreadMessages(previous, messages, currentUserId,
@@ -170,6 +174,8 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             setUnreadLedger(previous => recordIncomingMessage(previous, incoming, currentUserId,
                 selectedChat?.id ?? null, document.visibilityState === 'visible' && document.hasFocus()));
             dispatch(addMessage({...incoming, orderAt: new Date().toISOString()}));
+            notifyIncomingMessage(currentUserId, incoming.senderName ?? incoming.senderId,
+                `${incoming.chatId}:${incoming.id}`);
             return;
         }
         // The sender already adds the matching SEND_CHAT acknowledgement when the request resolves.
@@ -330,35 +336,43 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     };
 
     // Tìm tin nhắn mới nhất và lọc theo tên cuộc trò chuyện
-    const filteredChats = useMemo(() => {
-        return chats
-            .map((chat) => {
-                const latestMessage = messages
-                    .filter((message) => message.chatId === chat.id)
-                    .sort(
-                        (a, b) =>
-                            parseChatTime(b.orderAt ?? b.createdAt) -
-                            parseChatTime(a.orderAt ?? a.createdAt)
-                    )[0];
+    // Sắp xếp theo hoạt động mới nhất và không để các gói reaction nội bộ
+    // chiếm dòng xem trước hội thoại. Tính unread độc lập với từ khóa tìm kiếm.
+    const presentedChats = useMemo(() => {
+        const latestByChat = new Map<string, typeof messages[number]>();
+        for (const message of messages) {
+            if (parseInteraction(message.content)?.kind === "reaction") continue;
+            const key = message.chatId.toLowerCase();
+            const previous = latestByChat.get(key);
+            if (!previous || parseChatTime(message.orderAt ?? message.createdAt) >=
+                parseChatTime(previous.orderAt ?? previous.createdAt)) latestByChat.set(key, message);
+        }
+        return chats.map(chat => {
+            const latestMessage = latestByChat.get(chat.id.toLowerCase());
+            const preview = latestMessage ? mediaMessagePreview(legacyMediaPreview(visibleMessageContent(latestMessage.content))) : '';
+            return {
+                ...chat,
+                unreadCount: getChatUnread(unreadLedger, chat.id),
+                lastMessage: latestMessage ? `${latestMessage.senderId.toLowerCase() === currentUserId.toLowerCase() ? "Bạn: " : ""}${preview}` : '',
+                time: latestMessage ? formatChatTime(latestMessage.createdAt) : '',
+                lastActivity: latestMessage ? parseChatTime(latestMessage.orderAt ?? latestMessage.createdAt) : 0,
+            };
+        }).sort((a,b) => b.lastActivity - a.lastActivity);
+    }, [chats, messages, currentUserId, unreadLedger]);
 
-                return {
-                    ...chat,
-                    unreadCount: getChatUnread(unreadLedger, chat.id),
-                    lastMessage: latestMessage
-                        ? `${latestMessage.senderId === currentUserId ? "Bạn: " : ""}${latestMessage.content}`
-                        : "",
-                    time: latestMessage
-                        ? formatChatTime(latestMessage.createdAt)
-                        : "",
-                };
-            })
-            .filter((chat) =>
-                chat.name
-                    .toLocaleLowerCase()
-                    .includes(query.trim().toLocaleLowerCase())
-            );
-    }, [chats, messages, currentUserId, query, unreadLedger]);
+    const filteredChats = useMemo(() => presentedChats.filter(chat =>
+        chat.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())), [presentedChats, query]);
 
+    const unreadChats = useMemo(() => presentedChats.filter(chat => (chat.unreadCount ?? 0) > 0), [presentedChats]);
+    const unreadTotal = getTotalUnreadForChats(unreadLedger, chats.map(chat => chat.id));
+    const openConversation = (chat: Chat) => {
+        setSelectedChat(chat);
+        setNotificationsOpen(false);
+        if (document.visibilityState === 'visible' && document.hasFocus()) {
+            setUnreadLedger(previous => markChatRead(previous, chat.id));
+        }
+        if (activeSection !== 'Tin nhắn' && !(activeSection === 'Nhóm' && chat.kind === 'group')) setActiveSection('Tin nhắn');
+    };
     const currentChat = useMemo(() => {
         if (!selectedChat || selectedChat.kind === 'group') return selectedChat;
         const friend = friends.find(item => item.id.toLowerCase() === selectedChat.id.toLowerCase());
@@ -610,8 +624,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
 
     return (
         <main className={`app-shell lyra-workspace ${theme === "dark" ? "theme-dark" : ""} ${activeSection === "Danh bạ" ? "contacts-view" : ""}`}>
-            <CallOverlay username={currentUserId} />
-            <Sidebar unreadCount={getTotalUnreadForChats(unreadLedger, chats.map(chat => chat.id))} activeSection={activeSection} onSectionChange={(section) => {setSettingsOpen(false);setActiveSection(section); if(section !== "Cài đặt")setSelectedChat(null);}} settingsOpen={settingsOpen}
+            <Sidebar unreadCount={unreadTotal} activeSection={activeSection} onSectionChange={(section) => {setSettingsOpen(false);setActiveSection(section); if(section !== "Cài đặt")setSelectedChat(null);}} settingsOpen={settingsOpen}
                      onSettingsToggle={() => {setSettingsOpen(true);setActiveSection("Cài đặt");}} onLogout={handleLogout}/>
 
             {activeSection === "Cài đặt" ? <SettingsDialog theme={theme} onThemeChange={setTheme} onLogout={handleLogout} onClose={() => {setSettingsOpen(false);setActiveSection("Tin nhắn");}} /> : activeSection === "Danh bạ" ? <ContactDirectory
@@ -621,9 +634,9 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                 onOpenGroup={openGroup}
             /> : <>
                 <ChatList
-                    chats={activeSection === "Nhóm" ? filteredChats.filter(chat => chat.kind === "group") : activeSection === "Thư mục" ? filteredChats.filter(chat => pinnedIds.includes(chat.id)) : activeSection === "Cuộc gọi" ? [] : filteredChats}
+                    chats={activeSection === "Nhóm" ? filteredChats.filter(chat => chat.kind === "group") : (activeSection === "Thư mục" || activeSection === "Yêu thích") ? filteredChats.filter(chat => pinnedIds.includes(chat.id)) : activeSection === "Cuộc gọi" ? [] : filteredChats}
                     selectedId={selectedChat?.id}
-                    onSelect={(chat) => { setSelectedChat(chat); setUnreadLedger(previous => markChatRead(previous, chat.id)); if (activeSection !== 'Nhóm' && activeSection !== 'Tin nhắn') setActiveSection('Tin nhắn'); }}
+                    onSelect={openConversation}
                     query={query}
                     onQueryChange={setQuery}
                     onSearchUser={handleSearchUser}
@@ -643,13 +656,15 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                             onRefresh={() => { void refreshUserList(); }}
                             onLeave={leaveGroupFromDashboard}
                         />
-                            : activeSection === "Thư mục" && !selectedChat ? <div className="feature-placeholder"><i className="bi bi-folder2-open"/><h2>Thư mục đã lưu</h2><p>Mở cuộc trò chuyện ở mục Tin nhắn và bấm “Lưu vào thư mục” để đánh dấu ngay trên trình duyệt này.</p></div>
+                            : (activeSection === "Thư mục" || activeSection === "Yêu thích") && !selectedChat ? <div className="feature-placeholder"><i className="bi bi-star"/><h2>Cuộc trò chuyện yêu thích</h2><p>Đánh dấu các cuộc trò chuyện quan trọng để truy cập nhanh ở mục này.</p></div>
                                 : <>
 
                                     <ChatWindow key={`${currentUserId}:${currentChat?.id ?? 'empty'}`} chat={currentChat} currentUserId={currentUserId} onMessageSent={refreshUserList}
                                                 presenceError={presenceError} presenceChecking={presenceChecking}
                                                 onCheckPresence={checkSelectedPresence}
-                                                onRoomLeft={onGroupLeft}/>
+                                                onRoomLeft={onGroupLeft}
+                                                unreadCount={unreadTotal} onOpenNotifications={() => setNotificationsOpen(true)}
+                                                onCompose={() => openCompose("people")} onOpenSettings={() => {setSettingsOpen(true);setActiveSection("Cài đặt");}}/>
                                 </>}
                     {groupNotice && activeSection === 'Nhóm' && <div className="lyra-group-notification" role="status">
                         <i className="bi bi-check-circle" /> {groupNotice}
@@ -664,6 +679,21 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                     </div>
                 </section>
             </>}
+            {notificationsOpen && <div className="lyra-modal-backdrop" onMouseDown={event => {if (event.target === event.currentTarget) setNotificationsOpen(false);}}>
+                <section className="lyra-modal lyra-notification-center" role="dialog" aria-modal="true" aria-label="Thông báo tin nhắn chưa đọc">
+                    <header className="lyra-notifications-heading"><div><h2>Thông báo</h2><p>{unreadTotal ? `${unreadTotal} tin nhắn chưa đọc` : 'Bạn đã đọc hết tin nhắn'}</p></div>
+                        <button type="button" aria-label="Đóng thông báo" onClick={() => setNotificationsOpen(false)}><i className="bi bi-x-lg"/></button>
+                    </header>
+                    <div className="lyra-notifications-list">
+                        {unreadChats.length ? unreadChats.map(chat => <button type="button" className="lyra-notification-item" key={chat.id} onClick={() => openConversation(chat)}>
+                            <span className="lyra-notification-avatar">{chat.avatar}</span>
+                            <span className="lyra-notification-copy"><strong>{chat.name}</strong><small>{chat.lastMessage || 'Có tin nhắn mới'}</small></span>
+                            <span className="lyra-notification-count">{chat.unreadCount}</span>
+                        </button>) : <div className="lyra-notifications-empty"><i className="bi bi-bell-check"/><p>Hiện chưa có tin nhắn chưa đọc.</p></div>}
+                    </div>
+                    <p className="lyra-notifications-note">Chỉ đánh dấu đã đọc khi bạn mở hội thoại trong cửa sổ đang hoạt động. Thông báo này được tính từ dữ liệu tin nhắn đã nhận trên thiết bị.</p>
+                </section>
+            </div>}
             {composeOpen && <div className="lyra-modal-backdrop" onMouseDown={(e) => {if (e.target === e.currentTarget && !composeBusy) setComposeOpen(false);}}>
                 <form className="lyra-modal" onSubmit={event => {void handleComposeSubmit(event);}}>
                     <h2>{composeMode === "group" ? "Tạo nhóm mới (API 6)" : composeMode === "join" ? "Tham gia nhóm (JOIN_ROOM)" : "Tạo cuộc trò chuyện"}</h2>

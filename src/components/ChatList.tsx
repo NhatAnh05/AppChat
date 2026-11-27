@@ -22,7 +22,7 @@ type SearchResult = {
 };
 
 export function ChatList({chats, selectedId, onSelect, query, onQueryChange, onSearchUser, searchingUser, onCompose, groupMode = false}: ChatListProps) {
-  const [filter, setFilter] = useState<"all" | "people" | "group">("all");
+  const [filter, setFilter] = useState<"all" | "people" | "group" | "unread">("all");
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [checkingKeyword, setCheckingKeyword] = useState("");
   const keyword = query.trim();
@@ -30,7 +30,7 @@ export function ChatList({chats, selectedId, onSelect, query, onQueryChange, onS
   // Các cuộc trò chuyện hiện có
   const filteredChats = useMemo(() =>
           chats.filter((chat) =>
-              (groupMode ? chat.kind === 'group' : (filter === "all" || (chat.kind ?? "people") === filter)) && chat.name.toLowerCase().includes(keyword.toLowerCase())
+              (groupMode ? chat.kind === 'group' : (filter === "all" ? true : filter === "unread" ? Boolean(chat.unreadCount) : (chat.kind ?? "people") === filter)) && chat.name.toLowerCase().includes(keyword.toLowerCase())
           ), [chats, keyword, filter, groupMode]
   );
 
@@ -121,7 +121,7 @@ export function ChatList({chats, selectedId, onSelect, query, onQueryChange, onS
             </button>
           </div>
 
-          <label className="search-box">
+          <div className="chat-search-row"><label className="search-box">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="11" cy="11" r="7" />
               <path d="m16 16 4 4" />
@@ -141,12 +141,13 @@ export function ChatList({chats, selectedId, onSelect, query, onQueryChange, onS
                   x
                 </button>
             )}
-          </label>
+          </label><button type="button" className="filter-toggle-button" aria-label="Lọc tin chưa đọc" title="Lọc tin chưa đọc" aria-pressed={filter === "unread"} onClick={() => setFilter(current => current === "unread" ? "all" : "unread")}><i className="bi bi-sliders2" /></button></div>
 
           {!groupMode && <div className="chat-filters" role="group" aria-label="Lọc cuộc trò chuyện">
             <button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>Tất cả</button>
             <button className={filter === "people" ? "active" : ""} onClick={() => setFilter("people")}>Cá nhân</button>
             <button className={filter === "group" ? "active" : ""} onClick={() => setFilter("group")}>Nhóm</button>
+            <button className={filter === "unread" ? "active" : ""} onClick={() => setFilter("unread")}>Chưa đọc{chats.some(chat => chat.unreadCount) ? <span className="filter-dot" /> : null}</button>
           </div>}
         </header>
 
@@ -186,7 +187,7 @@ export function ChatList({chats, selectedId, onSelect, query, onQueryChange, onS
           {groupMode && keyword && filteredChats.length === 0 && <div className="list-empty">Không tìm thấy nhóm.</div>}
           {!keyword && filteredChats.length === 0 && (
               <div className="list-empty">
-                <strong>{groupMode ? 'Chưa tham gia nhóm nào' : 'Chưa có cuộc trò chuyện'}</strong>
+                <strong>{groupMode ? 'Chưa tham gia nhóm nào' : filter === 'unread' ? 'Bạn đã đọc hết tin nhắn' : 'Chưa có cuộc trò chuyện'}</strong>
               </div>
           )}
         </div>

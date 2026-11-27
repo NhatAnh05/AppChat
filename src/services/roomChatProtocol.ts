@@ -18,7 +18,7 @@ export function makeRoomRequest(event:'JOIN_ROOM'|'OUT_ROOM', name:string) {
 }
 export function makeRoomHistoryRequest(name:string, page:number) {
   if (!Number.isInteger(page) || page < 1) throw new Error('Trang lịch sử phải là số nguyên dương.');
-  return {action:'onchat', data:{event:CHAT_HISTORY_EVENT, data:{name:normalizeRoomName(name),page}}};
+  return {action:'onchat', data:{event:ROOM_HISTORY_EVENT, data:{name:normalizeRoomName(name),page}}};
 }
 export function makeRoomMessageRequest(name:string, content:string) {
   if (!content.trim()) throw new Error('Nhập nội dung tin nhắn nhóm.');
@@ -70,7 +70,7 @@ export function mapRoomMessage(value:unknown, roomName:string):ChatMessage|null 
 export function parseRoomHistoryResponse(input:unknown, name:string):
   | {status:'success';room:RoomDetails;messages:ChatMessage[]}
   | {status:'error';message:string} | null {
-  // API row 11: success uses CHAT_PEOPLE_GET_MES; room errors use GET_ROOM_CHAT_MES.
+  // Excel: GET_ROOM_CHAT_MES; vẫn đọc alias cũ nếu server chủ động từ chối event chính.
   const frame=parseFrame(input,ROOM_HISTORY_EVENT) ?? parseFrame(input,CHAT_HISTORY_EVENT);
   if(!frame)return null;
   if(frame.status==='error')return {status:'error',message:typeof frame.mes==='string'?frame.mes:'Không tải được lịch sử nhóm.'};

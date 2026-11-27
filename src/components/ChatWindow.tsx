@@ -12,7 +12,6 @@ import { readableGroupError } from '../services/groupManagement.ts'
 import { isHistoryUnsupported } from '../services/chatHistoryTransport.ts'
 import { normalizeSearch } from '../services/messageWorkspace.ts'
 import { HISTORY_REFRESH_MS } from '../services/chatRefreshPolicy.ts'
-import { requestCall } from '../services/callEvents.ts'
 
 type ChatWindowProps = {
     chat: Chat | null
@@ -22,9 +21,13 @@ type ChatWindowProps = {
     onCheckPresence?: (username: string) => Promise<boolean | undefined>
     presenceError?: string | null
     presenceChecking?: boolean
+    unreadCount?: number
+    onOpenNotifications?: () => void
+    onCompose?: () => void
+    onOpenSettings?: () => void
 }
 
-export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLeft, onCheckPresence, presenceError, presenceChecking}: ChatWindowProps) {
+export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLeft, onCheckPresence, presenceError, presenceChecking, unreadCount = 0, onOpenNotifications, onCompose, onOpenSettings}: ChatWindowProps) {
     const dispatch = useDispatch<AppDispatch>()
     const [detailOpen, setDetailOpen] = useState(false)
     const [toolsOpen, setToolsOpen] = useState(false)
@@ -37,6 +40,7 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
     const [leaveConfirm, setLeaveConfirm] = useState(false)
     const [membersLoading, setMembersLoading] = useState(false)
     const [replyTo, setReplyTo] = useState<ReplyReference | null>(null)
+    const [callMode, setCallMode] = useState<"voice" | "video" | null>(null)
 
     useEffect(() => {
         if (!chat) return
@@ -105,11 +109,15 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
 
     if (!chat) {
         return (<main className="chat-window chat-window-empty">
-                <div className="empty-chat">
-                    <div className="empty-chat-icon"><i className="bi bi-send" /></div>
+                <div className="empty-chat-topbar">
+                    <button type="button" className="topbar-icon-button" aria-label={`Thông báo${unreadCount ? `: ${unreadCount} tin chưa đọc` : ""}`} onClick={onOpenNotifications}><i className="bi bi-bell" />{unreadCount > 0 && <span className="topbar-dot" />}</button>
+                    <button type="button" className="topbar-avatar-button" aria-label="Cài đặt tài khoản" onClick={onOpenSettings}>{currentUserId.slice(0,2).toUpperCase()}</button>
+                </div>
+                <div className="empty-chat hero-empty">
+                    <div className="lyra-empty-art" aria-hidden="true"><div className="lyra-speech primary"><i/><i/><i/></div><div className="lyra-speech secondary"><i/><i/><i/></div><span className="lyra-art-sparkle">✦</span><span className="lyra-paper-plane"><i className="bi bi-send-fill" /></span></div>
                     <h2>Tin nhắn của bạn</h2>
-                    <p>Chọn một cuộc trò chuyện, hoặc tạo hội thoại bằng username thật.</p>
-                    <p className="empty-security"><i className="bi bi-lock" /> Tin nhắn và phòng chat kết nối WebSocket của giảng viên.</p>
+                    <p>Chọn một cuộc trò chuyện, hoặc tạo mới để bắt đầu nhắn tin và gọi điện trên LyraChat.</p>
+                    <button type="button" className="empty-chat-primary" onClick={onCompose}><i className="bi bi-pencil-square" /> Tạo cuộc trò chuyện mới</button>
                 </div>
             </main>
         )
@@ -128,10 +136,11 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
                     {chat.kind === 'people' && presenceError && <small role="status" title={presenceError} style={{color:'#b45309',fontSize:'11px'}}>Không kiểm tra được: {presenceError}</small>}
                 </div>
                 <div className="chat-header-actions">
-                    <button type="button" className="chat-tools-trigger" title="Công cụ tin nhắn" aria-label="Mở công cụ tin nhắn" aria-expanded={toolsOpen} onClick={() => setToolsOpen(old => !old)}><i className="bi bi-sliders" /> <span>Công cụ</span></button>
-                    {chat.kind === 'people' && <button type="button" aria-label="Kiểm tra trạng thái hoạt động" title="Kiểm tra online ngay và xem lỗi nếu API không phản hồi" disabled={presenceChecking} onClick={() => void onCheckPresence?.(chat.id)}><i className={`bi bi-${presenceChecking ? 'hourglass-split' : 'arrow-clockwise'}`} /></button>}
-                    <button type="button" title="Gọi thoại" aria-label="Gọi thoại" disabled={chat.kind === "group"} onClick={() => requestCall(chat.name,"voice")}><i className="bi bi-telephone" /></button>
-                    <button type="button" title="Gọi video" aria-label="Gọi video" disabled={chat.kind === "group"} onClick={() => requestCall(chat.name,"video")}><i className="bi bi-camera-video" /></button>
+                    <button type="button" className="chat-circle-btn lyra-bell-button" title="Thông báo" aria-label={`Thông báo${unreadCount ? `: ${unreadCount} tin chưa đọc` : ""}`} onClick={onOpenNotifications}><i className="bi bi-bell" />{unreadCount > 0 && <span className="lyra-bell-dot"/>}</button>
+                    <button type="button" className="chat-tools-trigger" title="Tìm kiếm và công cụ tin nhắn" aria-label="Tìm kiếm và công cụ tin nhắn" aria-expanded={toolsOpen} onClick={() => setToolsOpen(old => !old)}><i className="bi bi-search" /></button>
+                    <button type="button" className="chat-circle-btn" title="Gọi thoại" aria-label="Gọi thoại" onClick={() => setCallMode("voice")}><i className="bi bi-telephone" /></button>
+                    <button type="button" className="chat-circle-btn" title="Gọi video" aria-label="Gọi video" onClick={() => setCallMode("video")}><i className="bi bi-camera-video" /></button>
+                    <button type="button" className="chat-circle-btn" title="Thông tin" aria-label="Thông tin" onClick={() => { void openDetails(); }}><i className="bi bi-info-circle" /></button>
                     <button type="button" className="chat-profile-btn" onClick={() => { void openDetails(); }}><i className="bi bi-person-circle" /> <span>{chat.kind === "group" ? "Thông tin nhóm" : "Xem trang cá nhân"}</span></button>
                 </div>
             </header>
@@ -194,6 +203,16 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
                     <button className="lyra-main-action" onClick={() => setDetailOpen(false)}><i className="bi bi-chat-dots" /> Quay lại trò chuyện</button>
                 </section>
             </div>}
+            {callMode && <div className="lyra-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setCallMode(null) }}>
+                <section className="lyra-call-card" role="dialog" aria-modal="true" aria-label="Thông tin cuộc gọi">
+                    <button className="lyra-icon-close" onClick={() => setCallMode(null)} aria-label="Đóng"><i className="bi bi-x-lg" /></button>
+                    <div className="lyra-call-symbol"><i className={`bi bi-${callMode === "video" ? "camera-video" : "telephone"}`} /></div>
+                    <h2>{callMode === "video" ? "Gọi video" : "Gọi thoại"}</h2>
+                    <p>Cuộc gọi đến <strong>{chat.name}</strong> chưa thể bắt đầu. API hiện tại chưa cung cấp tín hiệu thiết lập cuộc gọi WebRTC.</p>
+                    <button className="lyra-main-action" onClick={() => setCallMode(null)}>Đã hiểu</button>
+                </section>
+            </div>}
+
             <MessageList
                 key={`${currentUserId}:${chat.id}`}
                 chatId={chat.id}

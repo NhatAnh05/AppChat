@@ -61,11 +61,6 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
   const mediaItems = library.filter(media => mediaFilter === 'all' || media.kind === mediaFilter || (mediaFilter === 'image' && media.kind === 'gif'));
   const bookmarkedCount = visibleMessages.filter(m => bookmarks.includes(bookmarkId(m))).length;
   const selectedMessages = visibleMessages.filter(m => selectedIds.includes(m.id));
-  // Chỉ một trạng thái lịch sử được phép hiện tại một thời điểm.
-  const historyLoading = !history || history.loading;
-  const historyError = history?.error ?? null;
-  const historyIsUnsupported = Boolean(historyError && /ACTION_NOT_EXIT|không hỗ trợ API|không được hỗ trợ/i.test(historyError));
-  const showInitialHistoryStatus = view === 'all' && shownMessages.length === 0;
 
   const forwardTargets: ForwardTarget[] = [
     ...friends.filter(friend => friend.id.toLowerCase() !== currentUserId.toLowerCase()).map(friend => ({id:friend.id,name:friend.name,kind:'people' as const})),
@@ -201,10 +196,8 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
       </div>}
       {reactionError && <div className="history-error" role="alert"><span>Không đồng bộ được cảm xúc: {reactionError}</span><button type="button" onClick={()=>setReactionError(null)}>Đóng</button></div>}
       {history?.hasMore && <button className="history-load-more" type="button" onClick={()=>loadPage(nextPage)} disabled={history.loading}>{history.loading && nextPage>1?'Đang tải tin nhắn cũ hơn...':'Tải tin nhắn cũ hơn'}</button>}
-      {historyError && <div className={`history-error${showInitialHistoryStatus ? " history-status-centered" : ""}`} role="alert">
-        <span>{historyIsUnsupported ? 'Máy chủ từ chối API lấy lịch sử nhóm (ACTION_NOT_EXIT). Tin nhắn mới vẫn có thể đến qua WebSocket; lịch sử cũ cần API phía máy chủ hỗ trợ.' : historyError}</span>
-        {!historyIsUnsupported && <button type="button" onClick={()=>loadPage(firstPageLoaded?nextPage:1)} disabled={historyLoading}>Thử lại</button>}
-      </div>}
+      {history?.error && <div className="history-error" role="alert"><span>{history.error}</span><button type="button" onClick={()=>loadPage(firstPageLoaded?nextPage:1)} disabled={history.loading}>Thử lại</button></div>}
+      {(history?.loading || !history) && !history?.error && chatMessages.length===0 && <p className="empty-messages">Đang tải lịch sử tin nhắn...</p>}
       {view === 'media' ? <div className="lyra-workspace-gallery">
         {mediaItems.length===0 ? <p className="empty-messages">Không có tệp tương ứng trong lịch sử đã tải.</p> : mediaItems.map(media => <article className="lyra-workspace-media-card" key={`${media.messageId}-${media.url}`}>
           {media.kind==='image'||media.kind==='gif' ? <img src={media.url} alt={media.name} loading="lazy"/> : <i className={`bi bi-${media.kind==='video'?'camera-video':'file-earmark-text'}`} aria-hidden="true"/>}
@@ -212,11 +205,7 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
           <div><button type="button" onClick={()=>jumpTo(media.messageId)}>Xem tin</button><a href={media.url} rel="noopener noreferrer" target="_blank">Mở tệp</a></div>
         </article>)}
       </div> : <>
-        {shownMessages.length===0 && (view !== 'all' || showInitialHistoryStatus) && (
-          historyError ? null : historyLoading && view === 'all'
-            ? <p className="empty-messages" role="status">Đang tải lịch sử tin nhắn...</p>
-            : <p className="empty-messages">{view==='saved'?'Chưa có tin nhắn đã lưu trong phần lịch sử đang tải.':search?'Không tìm thấy tin nhắn phù hợp.': 'Chưa có tin nhắn. Hãy bắt đầu trò chuyện!'}</p>
-        )}
+        {shownMessages.length===0 && !history?.loading && !history?.error && <p className="empty-messages">{view==='saved'?'Chưa có tin nhắn đã lưu trong phần lịch sử đang tải.':search?'Không tìm thấy tin nhắn phù hợp.':'Chưa có tin nhắn. Hãy bắt đầu trò chuyện!'}</p>}
         {shownMessages.map(message => <MessageItem key={`${message.chatId}-${message.id}`}
           message={message} currentUserId={currentUserId}
           reactions={Array.from(reactions.get(message.id)?.values()??[]).flatMap(set=>[...set])}

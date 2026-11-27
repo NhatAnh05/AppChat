@@ -7,9 +7,9 @@ import { makeRoomHistoryRequest, parseRoomHistoryResponse } from '../src/service
 const people = [{ id:1,name:'alice',to:'bob',mes:'Xin chào',createAt:'2026-11-22 20:00:00',type:0 }];
 const room = {name:'Team',user:[{id:1,name:'alice'}],chatMess:[{id:2,name:'alice',to:'Team',mes:'Chào nhóm',createAt:'2026-11-22 20:00:00',type:1}]};
 
-test('Giai đoạn 1: yêu cầu lịch sử nhóm dùng CHAT_PEOPLE_GET_MES theo API dòng 11', () => {
+test('Giai đoạn 1: yêu cầu lịch sử nhóm dùng GET_ROOM_CHAT_MES theo Excel', () => {
   assert.equal(HISTORY_EVENT,'CHAT_PEOPLE_GET_MES'); // alias cũ vẫn đọc được
-  assert.equal(makeRoomHistoryRequest('Team',1).data.event,'CHAT_PEOPLE_GET_MES');
+  assert.equal(makeRoomHistoryRequest('Team',1).data.event,'GET_ROOM_CHAT_MES');
 });
 test('Giai đoạn 1: phản hồi lịch sử cá nhân không bị nhận làm lịch sử nhóm', () => {
   const frame={event:HISTORY_EVENT,status:'success',data:people};
@@ -17,7 +17,7 @@ test('Giai đoạn 1: phản hồi lịch sử cá nhân không bị nhận làm
   assert.equal(historyResponseMatches(frame,'room','Team'),false);
 });
 test('Giai đoạn 1: phản hồi phòng đúng tên được nhận, phòng khác bị bỏ qua', () => {
-  const frame={event:'CHAT_PEOPLE_GET_MES',status:'success',data:room};
+  const frame={event:'GET_ROOM_CHAT_MES',status:'success',data:room};
   assert.equal(historyResponseMatches(frame,'people','alice'),false);
   assert.equal(historyResponseMatches(frame,'room','Other'),false);
   assert.equal(historyResponseMatches(frame,'room','Team'),true);

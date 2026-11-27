@@ -13,12 +13,13 @@ type SidebarProps = {
 };
 
 const navItems = [
-  { label: 'Tin nh\u1EAFn', icon: 'message' },
-  { label: 'Danh b\u1EA1', icon: 'users' },
-  { label: 'Nhóm', icon: 'group' },
-  { label: 'Cuộc gọi', icon: 'phone' },
-  { label: 'Thư mục', icon: 'folder' },
-  { label: 'C\u00E0i \u0111\u1EB7t', icon: 'settings' },
+  { label: 'Tin nhắn', icon: 'message', section: 'Tin nhắn' },
+  { label: 'Danh bạ', icon: 'users', section: 'Danh bạ' },
+  { label: 'Nhóm', icon: 'group', section: 'Nhóm' },
+  { label: 'Cuộc gọi', icon: 'phone', section: 'Cuộc gọi' },
+  { label: 'Thư mục', icon: 'folder', section: 'Thư mục' },
+  { label: 'Yêu thích', icon: 'star', section: 'Yêu thích' },
+  { label: 'Cài đặt', icon: 'settings', section: 'Cài đặt' },
 ];
 
 function NavIcon({ name }: { name: string }) {
@@ -27,6 +28,7 @@ function NavIcon({ name }: { name: string }) {
   if (name === 'group') return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M17 15a5 5 0 0 1 4 5"/></svg>;
   if (name === 'phone') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h4l2 5-2.6 2.3a15 15 0 0 0 4.3 4.3L16 12l5 2v4a3 3 0 0 1-3 3A15 15 0 0 1 3 6a3 3 0 0 1 3-3Z"/></svg>;
   if (name === 'folder') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 3h9v11H3V6Z"/><path d="M17 12v6m-3-3h6"/></svg>;
+  if (name === 'star') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9L12 3Z"/></svg>;
   return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="m19.4 15 .1.1a1.7 1.7 0 1 1-2.4 2.4l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a1.7 1.7 0 1 1-3.4 0v-.2a1.7 1.7 0 0 0-2.9-1.2l-.1.1a1.7 1.7 0 1 1-2.4-2.4l.1-.1a1.7 1.7 0 0 0-1.2-2.9H4a1.7 1.7 0 1 1 0-3.4h.2a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a1.7 1.7 0 1 1 2.4-2.4l.1.1a1.7 1.7 0 0 0 2.9-1.2V2a1.7 1.7 0 1 1 3.4 0v.2a1.7 1.7 0 0 0 2.9 1.2l.1-.1a1.7 1.7 0 1 1 2.4 2.4l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a1.7 1.7 0 1 1 0 3.4h-.2a1.7 1.7 0 0 0-1.2 2.9Z" /></svg>;
 }
 
@@ -69,8 +71,8 @@ export function Sidebar({ activeSection, unreadCount, onSectionChange, settingsO
     <nav className="sidebar-nav" aria-label="&#272;i&#7873;u h&#432;&#7899;ng ch&#237;nh">
       {navItems.map((item) => {
         const isSettings = item.icon === 'settings';
-        const selected = isSettings ? settingsOpen : activeSection === item.label;
-        const button = <button className={`nav-item ${selected ? 'is-active' : ''}`} onClick={() => isSettings ? onSettingsToggle() : onSectionChange(item.label)}><NavIcon name={item.icon} /><span>{item.label}</span>{item.icon === 'message' && unreadCount > 0 && <span className="nav-unread-badge" aria-label={`${unreadCount} tin nhắn chưa đọc`}>{unreadCount > 99 ? '99+' : unreadCount}</span>}</button>;
+        const selected = isSettings ? settingsOpen : activeSection === item.section;
+        const button = <button className={`nav-item ${selected ? 'is-active' : ''}`} onClick={() => isSettings ? onSettingsToggle() : onSectionChange(item.section)}><NavIcon name={item.icon} /><span>{item.label}</span>{item.icon === 'message' && unreadCount > 0 && <span className="nav-unread-badge" aria-label={`${unreadCount} tin nhắn chưa đọc`}>{unreadCount > 99 ? '99+' : unreadCount}</span>}</button>;
         return <div key={item.label}>{button}</div>;
       })}
     </nav>

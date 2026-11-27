@@ -1,5 +1,7 @@
+@import url('https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;500;600;700;800&display=swap');
+
 :root {
-  font-family: Inter, Arial, sans-serif;
+  font-family: "Nunito Sans", "Segoe UI", Arial, sans-serif;
   color: #0f172a;
   background: #f8fafc;
   font-synthesis: none;
@@ -12,7 +14,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; }
-button, input { font: inherit; }
+button, input, textarea, select { font: inherit; }
 button { color: inherit; }
 #root { min-height: 100vh; }
 

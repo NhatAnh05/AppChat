@@ -12,14 +12,14 @@ test('Lịch sử cá nhân ưu tiên event server đã xác nhận, vẫn có f
   resetHistoryCompatibility();
   assert.equal(historyEventCandidates('people')[0], 'GET_PEOPLE_CHAT_MES');
   assert.deepEqual(historyEventCandidates('people'), ['GET_PEOPLE_CHAT_MES', 'CHAT_PEOPLE_GET_MES']);
-  assert.deepEqual(historyEventCandidates('room'), ['CHAT_PEOPLE_GET_MES']);
+  assert.deepEqual(historyEventCandidates('room'), ['GET_ROOM_CHAT_MES', 'CHAT_PEOPLE_GET_MES']);
 });
 test('Giai đoạn 3: nhận đúng phản hồi cũ và mới, không trộn room/people', () => {
   assert.equal(historyResponseMatches({event:'GET_PEOPLE_CHAT_MES',status:'success',data:people},'people','B'),true);
   assert.equal(historyResponseMatches({event:'GET_PEOPLE_CHAT_MES',status:'success',data:people},'room','Nhom_HocTap'),false);
-  assert.equal(historyResponseMatches({event:'CHAT_PEOPLE_GET_MES',status:'success',data:room},'room','Nhom_HocTap'),true);
-  assert.equal(historyResponseMatches({event:'CHAT_PEOPLE_GET_MES',status:'success',data:room},'room','Sai'),false);
-  const parsed = parseRoomHistoryResponse({event:'CHAT_PEOPLE_GET_MES',status:'success',data:room},'Nhom_HocTap');
+  assert.equal(historyResponseMatches({event:'GET_ROOM_CHAT_MES',status:'success',data:room},'room','Nhom_HocTap'),true);
+  assert.equal(historyResponseMatches({event:'GET_ROOM_CHAT_MES',status:'success',data:room},'room','Sai'),false);
+  const parsed = parseRoomHistoryResponse({event:'GET_ROOM_CHAT_MES',status:'success',data:room},'Nhom_HocTap');
   assert.equal(parsed?.status, 'success');
   assert.equal(parsed?.messages.length, 1);
 });

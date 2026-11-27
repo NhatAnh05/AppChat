@@ -46,8 +46,8 @@ test('Stage1: queue shares one request channel for people and group histories',a
   await tick();
   assert.equal(outgoing().length,2);
   assert.equal(outgoing()[1].data.data.name,'Team');
-  assert.equal(outgoing()[1].data.event, 'CHAT_PEOPLE_GET_MES'); // API mục 11
-  socket.receive({event:'CHAT_PEOPLE_GET_MES',status:'success',data:room});
+  assert.equal(outgoing()[1].data.event, 'GET_ROOM_CHAT_MES'); // API 9 đúng theo Excel
+  socket.receive({event:'GET_ROOM_CHAT_MES',status:'success',data:room});
   assert.equal((await roomPromise).messages[0].content,'Chào nhóm');
   disconnectLoginSession();
 });

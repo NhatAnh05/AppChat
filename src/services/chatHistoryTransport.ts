@@ -1,7 +1,6 @@
 /**
- * Room history request uses CHAT_PEOPLE_GET_MES; its room-error response
- * may instead use GET_ROOM_CHAT_MES, as specified by API row 11.
- * Personal-chat history retains its separately verified compatibility behavior.
+ * Excel specifies GET_PEOPLE_CHAT_MES for people and GET_ROOM_CHAT_MES for rooms.
+ * Keep the existing CHAT_PEOPLE_GET_MES compatibility alias only for ACTION_NOT_EXIT.
  * Responses have no request ID, so both history types share one queue.
  */
 import { ensureLoginConnection } from './loginService.ts';
@@ -15,7 +14,7 @@ type HistoryKind = 'people' | 'room';
 let queue: Promise<void> = Promise.resolve();
 const ALTERNATES: Record<HistoryKind, string> = {
   people: 'GET_PEOPLE_CHAT_MES',
-  room: CHAT_HISTORY_EVENT,
+  room: ROOM_HISTORY_EVENT,
 };
 let currentSocket: WebSocket | null = null;
 const unsupported = new Set<HistoryKind>();
@@ -45,15 +44,12 @@ export function historyEventCandidates(kind: HistoryKind): string[] {
   // Request the Excel event first for both kinds of chat history.
   // Use the older alias only if the server explicitly rejects the event.
   const first = preferredEvent.get(kind) ?? ALTERNATES[kind];
-  // The documented room request must be CHAT_PEOPLE_GET_MES.
-  // GET_ROOM_CHAT_MES is a documented room ERROR response, not a request.
-  if (kind === 'room') return [HISTORY_EVENT];
   return [...new Set([first, HISTORY_EVENT, ALTERNATES[kind]])];
 }
 
 
 export function historyResponseMatches(message: WebSocketMessage, kind: HistoryKind, name: string): boolean {
-  if (message.event === ROOM_EVENT) return kind === 'room' && message.status === 'error';
+  if (message.event === ROOM_EVENT && kind !== 'room') return false;
   if (message.event !== HISTORY_EVENT && message.event !== ALTERNATES[kind]) return false;
   if (message.status === 'error') return true; // shared event; queue guarantees one outstanding request
   if (kind === 'people') return Array.isArray(message.data);
@@ -94,8 +90,6 @@ export function requestChatHistory(name: string, page: number, kind: HistoryKind
           };
           cleanups.push(websocketService.on(HISTORY_EVENT, receive));
           cleanups.push(websocketService.on(ALTERNATES[kind], receive));
-          // Room errors use GET_ROOM_CHAT_MES despite the CHAT_PEOPLE_GET_MES request.
-          if (kind === 'room') cleanups.push(websocketService.on(ROOM_EVENT, receive));
           cleanups.push(websocketService.on('ACTION_NOT_EXIT', () => finish(new Error('ACTION_NOT_EXIT'))));
           cleanups.push(websocketService.onStatus(status => {
             if (status === 'ERROR' || status === 'DISCONNECTED') finish(new Error('Mất kết nối khi tải lịch sử.'));
@@ -118,7 +112,7 @@ export function requestChatHistory(name: string, page: number, kind: HistoryKind
       }
     }
     unsupported.add(kind);
-    throw new Error('Máy chủ trả ACTION_NOT_EXIT: API lịch sử không được hỗ trợ. Đã dừng tự động tải lại để tránh spam WebSocket.');
+    throw new Error('Máy chủ trả ACTION_NOT_EXIT: cả API lịch sử mới và phiên bản cũ đều không được hỗ trợ. Đã dừng tự động tải lại để tránh spam WebSocket.');
   }));
   queue = run.then(() => undefined, () => undefined);
   return run;

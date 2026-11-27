@@ -21,20 +21,22 @@ test('JOIN_ROOM uses the authenticated socket and waits for confirmed membership
 test('JOIN_ROOM error does not create phantom group',async()=>{const s=await login();const p=joinRoom('NoRoom');await tick();s.receive({event:'JOIN_ROOM',status:'error',mes:'Room not found'});await assert.rejects(p,/Room not found/);disconnectLoginSession()});
 test('OUT_ROOM owner rejection is shown, not treated as a leave',async()=>{const s=await login();const p=leaveRoom('ABC');await tick();s.receive({event:'OUT_ROOM',status:'error',mes:'room owner'});await assert.rejects(p,/owner/);disconnectLoginSession()});
 test('OUT_ROOM successful response resolves',async()=>{const s=await login();const p=leaveRoom('ABC');await tick();s.receive({event:'OUT_ROOM',status:'success',data:{mes:'You left the room successfully!'}});await p;disconnectLoginSession()});
-test('CHAT_PEOPLE_GET_MES room requests page, keeps server id and maps history',async()=>{const s=await login();const p=getRoomHistory('ABC',2);await tick();assert.deepEqual(s.sent.at(-1),{action:'onchat',data:{event:'CHAT_PEOPLE_GET_MES',data:{name:'ABC',page:2}}});s.receive({event:'CHAT_PEOPLE_GET_MES',status:'success',data:{...room(),chatMess:[{id:22,name:'owner',to:'ABC',mes:'Hello',type:1,createAt:'2026-11-02 10:00:00'}]}});const result=await p;assert.equal(result.messages[0].id,'22');disconnectLoginSession()});
-test('Room history uses documented event and does not retry undocumented request on ACTION_NOT_EXIT', async () => {
+test('GET_ROOM_CHAT_MES requests page, keeps server id and maps history',async()=>{const s=await login();const p=getRoomHistory('ABC',2);await tick();assert.deepEqual(s.sent.at(-1),{action:'onchat',data:{event:'GET_ROOM_CHAT_MES',data:{name:'ABC',page:2}}});s.receive({event:'GET_ROOM_CHAT_MES',status:'success',data:{...room(),chatMess:[{id:22,name:'owner',to:'ABC',mes:'Hello',type:1,createAt:'2026-11-02 10:00:00'}]}});const result=await p;assert.equal(result.messages[0].id,'22');disconnectLoginSession()});
+test('API 9 only falls back to legacy event after ACTION_NOT_EXIT', async () => {
  const socket = await login();
  const pending = getRoomHistory('ABC', 1);
  await tick();
- assert.equal(socket.sent.at(-1).data.event, 'CHAT_PEOPLE_GET_MES');
+ assert.equal(socket.sent.at(-1).data.event, 'GET_ROOM_CHAT_MES');
  socket.receive({event:'ACTION_NOT_EXIT',status:'error',mes:'Unknown action'});
- await assert.rejects(pending,/không được hỗ trợ/);
- assert.deepEqual(socket.sent.filter(f=>f.data.event==='CHAT_PEOPLE_GET_MES'||f.data.event==='GET_ROOM_CHAT_MES').map(f=>f.data.event),['CHAT_PEOPLE_GET_MES']);
+ await tick();
+ assert.equal(socket.sent.at(-1).data.event, 'CHAT_PEOPLE_GET_MES');
+ socket.receive({event:'CHAT_PEOPLE_GET_MES',status:'success',data:room()});
+ assert.equal((await pending).room.name, 'ABC');
  disconnectLoginSession();
 });
 test('SEND_CHAT room waits for matching group broadcast',async()=>{const s=await login();const p=sendRoomMessage('ABC','Hello');await tick();assert.deepEqual(s.sent.at(-1),{action:'onchat',data:{event:'SEND_CHAT',data:{type:'room',to:'ABC',mes:'Hello'}}});s.receive({event:'SEND_CHAT',status:'success',data:{name:'owner',to:'DIFFERENT',mes:'Hello',type:1}});s.receive({event:'SEND_CHAT',status:'success',data:{name:'participant',to:'ABC',mes:'Hello',type:1}});const result=await p;assert.equal(result.content,'Hello');disconnectLoginSession()});
 test('SEND_CHAT denied when user not a group member',async()=>{const s=await login();const p=sendRoomMessage('ABC','msg');await tick();s.receive({event:'SEND_CHAT',status:'error',mes:'You are not in this room!'});await assert.rejects(p,/not in this room/);disconnectLoginSession()});
-test('Timeout does not retry API 9 using an undocumented event',async()=>{const s=await login();const p=getRoomHistory('ABC',1,{timeoutMs:3});await assert.rejects(p,/chưa phản hồi/);assert.deepEqual(s.sent.filter(f=>f.data.event==='GET_ROOM_CHAT_MES'||f.data.event==='CHAT_PEOPLE_GET_MES').map(f=>f.data.event),['CHAT_PEOPLE_GET_MES']);assert.equal(s.readyState,1);disconnectLoginSession()});
+test('Timeout does not retry API 9 using an undocumented event',async()=>{const s=await login();const p=getRoomHistory('ABC',1,{timeoutMs:3});await assert.rejects(p,/chưa phản hồi/);assert.deepEqual(s.sent.filter(f=>f.data.event==='GET_ROOM_CHAT_MES'||f.data.event==='CHAT_PEOPLE_GET_MES').map(f=>f.data.event),['GET_ROOM_CHAT_MES']);assert.equal(s.readyState,1);disconnectLoginSession()});
 test('Logout connection closes pending operation',async()=>{const s=await login();const p=joinRoom('ABC');await tick();s.close();await assert.rejects(p,/Mất kết nối/);disconnectLoginSession()});
 
 test('OUT_ROOM ignores a confirmation for a different named room', async () => {
@@ -56,15 +58,5 @@ test('OUT_ROOM rejects invalid room name locally without sending a packet', asyn
  const count = socket.sent.length;
  await assert.rejects(leaveRoom('   '), /tên nhóm/);
  assert.equal(socket.sent.length, count);
- disconnectLoginSession();
-});
-
-test('API row 11: GET_ROOM_CHAT_MES error rejects CHAT_PEOPLE_GET_MES room request',async()=>{
- const socket=await login();
- const pending=getRoomHistory('ABC',1);
- await tick();
- assert.equal(socket.sent.at(-1).data.event,'CHAT_PEOPLE_GET_MES');
- socket.receive({status:'error',event:'GET_ROOM_CHAT_MES',mes:'Room not found or You not in room'});
- await assert.rejects(pending,/Room not found or You not in room/);
  disconnectLoginSession();
 });

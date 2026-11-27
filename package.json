@@ -14,8 +14,7 @@
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "test:realtime:mock": "node --experimental-strip-types --test tests/stage1RealtimeIntegration.test.mjs tests/stage1TwoWayMessaging.test.mjs",
     "test:realtime:live": "node scripts/check-realtime-two-way.mjs",
-    "test:history:live": "node scripts/check-teacher-history.mjs",
-    "call-signaling": "node server/call-signaling.mjs"
+    "test:history:live": "node scripts/check-teacher-history.mjs"
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.13.0",
