@@ -28,7 +28,7 @@ test('Room history uses documented event and does not retry undocumented request
  await tick();
  assert.equal(socket.sent.at(-1).data.event, 'CHAT_PEOPLE_GET_MES');
  socket.receive({event:'ACTION_NOT_EXIT',status:'error',mes:'Unknown action'});
- await assert.rejects(pending,/ACTION_NOT_EXIT/);
+ await assert.rejects(pending,/không được hỗ trợ/);
  assert.deepEqual(socket.sent.filter(f=>f.data.event==='CHAT_PEOPLE_GET_MES'||f.data.event==='GET_ROOM_CHAT_MES').map(f=>f.data.event),['CHAT_PEOPLE_GET_MES']);
  disconnectLoginSession();
 });

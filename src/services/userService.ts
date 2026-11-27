@@ -1,9 +1,9 @@
 import { ensureLoginConnection } from "./loginService.ts";
 import { websocketService, type WebSocketMessage } from "./websocket.ts";
 import { withApiProbeGate } from "./apiProbeGate.ts";
-import { parseUserExistResponse, USER_EXIST_REQUEST_EVENT, USER_EXIST_RESPONSE_EVENT } from "./userExistProtocol.ts";
 
 
+type UserCheckResponse = { status?: unknown };
 
 // Phản hồi kiểm tra online không có requestId/username: chỉ gửi một yêu cầu mỗi lần.
 let pendingCheck: Promise<unknown> = Promise.resolve();
@@ -35,12 +35,12 @@ function checkResponse(requestEvent: string, responseEvent: string, username: st
                 finish(new Error(message.mes || `${responseEvent} thất bại.`));
                 return;
             }
-            const value = parseUserExistResponse(message.data);
-            if (value === null) {
-                finish(new Error(`Phản hồi ${responseEvent} không hợp lệ (thiếu data.status boolean).`));
+            const data = message.data as UserCheckResponse | undefined;
+            if (typeof data?.status !== 'boolean') {
+                finish(new Error(`Phản hồi ${responseEvent} không hợp lệ.`));
                 return;
             }
-            finish(undefined, value);
+            finish(undefined, data.status);
         };
         cleanups.push(websocketService.on(responseEvent, onResponse));
         if (requestEvent !== responseEvent) cleanups.push(websocketService.on(requestEvent, onResponse));
@@ -99,7 +99,7 @@ export const userService = {
     checkUserExist(username: string): Promise<boolean> {
         return serializedCheck(async () => {
             await ensureLoginConnection();
-            return checkResponse(USER_EXIST_REQUEST_EVENT, USER_EXIST_RESPONSE_EVENT, username.trim());
+            return checkResponse('CHAT_CHECK_USER_EXIST', 'CHECK_USER_EXIST', username);
         });
     },
     checkUserOnline,

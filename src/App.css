@@ -981,3 +981,38 @@
 
 .lyra-tools-modal-backdrop.theme-dark .lyra-tools-dialog { background:#15251f; border-color:#3a5b4c; color:#d7f2e0; }
 .lyra-tools-modal-backdrop.theme-dark .lyra-tools-dialog-header button { background:#294336; color:#dbf3e4; }
+
+/* Chỉ hiện một trạng thái trung tâm khi cuộc trò chuyện chưa có tin. */
+.lyra-conversation-content > .message-list > .history-status-centered {
+  box-sizing: border-box;
+  min-height: calc(100% - 8px);
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  line-height: 1.6;
+  padding: 28px;
+}
+
+/* WebRTC voice / video calls */
+.lyra-call-overlay {z-index: 1200;}
+.lyra-live-call {width:min(95vw,680px);max-height:90vh;overflow:auto;padding:26px;border-radius:20px;background:#fff;box-shadow:0 25px 80px #0005;color:#173d37;text-align:center;}
+.lyra-live-head h2 {margin:10px 0 4px;font-size:23px;}
+.lyra-live-head p {margin:0 0 20px;color:#667b79;}
+.lyra-call-avatar {width:76px;height:76px;display:grid;place-items:center;border-radius:50%;background:#2c917f;color:#fff;font-weight:700;font-size:23px;margin:0 auto;}
+.lyra-call-videos {height:min(44vh,340px);background:#142b2e;position:relative;border-radius:12px;overflow:hidden;margin-bottom:16px;}
+.lyra-remote-video {height:100%;width:100%;object-fit:contain;}
+.lyra-local-video {position:absolute;right:12px;bottom:12px;width:25%;height:38%;object-fit:cover;transform:scaleX(-1);border-radius:10px;border:2px solid #fff;background:#2d4146;}
+.lyra-call-controls {display:flex;gap:12px;justify-content:center;flex-wrap:wrap;}
+.lyra-call-controls button {padding:12px 18px;border-radius:26px;border:1px solid #dae5e2;background:#eff7f5;color:#185b4d;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:7px;}
+.lyra-call-controls button:disabled {opacity:.45;cursor:not-allowed;}
+.lyra-call-controls .lyra-call-danger {background:#df4a52;border-color:#df4a52;color:white;}
+.lyra-call-controls .lyra-call-accept {background:#167c62;border-color:#167c62;color:white;}
+.lyra-call-toast {position:fixed;bottom:78px;right:22px;z-index:1300;background:#173f39;color:white;border-radius:12px;padding:12px 15px;box-shadow:0 7px 22px #0003;display:flex;align-items:center;gap:15px;max-width:min(440px,94vw);}
+.lyra-call-toast button {border:0;background:transparent;color:white;cursor:pointer;font-size:19px;}
+.lyra-call-connection {position:fixed;bottom:5px;right:16px;z-index:100;color:#a33;font-size:11px;pointer-events:none;}

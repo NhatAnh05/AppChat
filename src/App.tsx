@@ -10,6 +10,7 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { Login } from "./components/Login";
 import { Register } from "./components/Register";
 import ChatWindow from "./components/ChatWindow";
+import CallOverlay from "./components/CallOverlay";
 import {clearCredentials, setCredentials,} from "./features/auth/authSlice";
 import { AuthInitializer } from "./features/auth/AuthInitializer";
 import { contactService } from "./services/contactService";
@@ -609,6 +610,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
 
     return (
         <main className={`app-shell lyra-workspace ${theme === "dark" ? "theme-dark" : ""} ${activeSection === "Danh bạ" ? "contacts-view" : ""}`}>
+            <CallOverlay username={currentUserId} />
             <Sidebar unreadCount={getTotalUnreadForChats(unreadLedger, chats.map(chat => chat.id))} activeSection={activeSection} onSectionChange={(section) => {setSettingsOpen(false);setActiveSection(section); if(section !== "Cài đặt")setSelectedChat(null);}} settingsOpen={settingsOpen}
                      onSettingsToggle={() => {setSettingsOpen(true);setActiveSection("Cài đặt");}} onLogout={handleLogout}/>
 

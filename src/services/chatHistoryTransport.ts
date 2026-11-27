@@ -70,7 +70,7 @@ export function requestChatHistory(name: string, page: number, kind: HistoryKind
     await ensureLoginConnection();
     if (signal?.aborted) throw new Error('Đã hủy tải lịch sử.');
     currentCapabilities();
-    if (unsupported.has(kind)) throw new Error('Máy chủ đang từ chối API lịch sử trò chuyện này (ACTION_NOT_EXIT). Không thử lại cho đến khi kết nối WebSocket thay đổi.');
+    if (unsupported.has(kind)) throw new Error('Máy chủ không hỗ trợ API lấy lịch sử cho loại cuộc trò chuyện này. Hãy kiểm tra phiên bản API.');
     const candidates = historyEventCandidates(kind);
     for (const event of candidates) {
       try {
@@ -118,7 +118,7 @@ export function requestChatHistory(name: string, page: number, kind: HistoryKind
       }
     }
     unsupported.add(kind);
-    throw new Error('Máy chủ từ chối API lịch sử (ACTION_NOT_EXIT). Đã ngừng gửi yêu cầu trên kết nối này để tránh lặp lỗi.');
+    throw new Error('Máy chủ trả ACTION_NOT_EXIT: API lịch sử không được hỗ trợ. Đã dừng tự động tải lại để tránh spam WebSocket.');
   }));
   queue = run.then(() => undefined, () => undefined);
   return run;

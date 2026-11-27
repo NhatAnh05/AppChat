@@ -12,6 +12,7 @@ import { readableGroupError } from '../services/groupManagement.ts'
 import { isHistoryUnsupported } from '../services/chatHistoryTransport.ts'
 import { normalizeSearch } from '../services/messageWorkspace.ts'
 import { HISTORY_REFRESH_MS } from '../services/chatRefreshPolicy.ts'
+import { requestCall } from '../services/callEvents.ts'
 
 type ChatWindowProps = {
     chat: Chat | null
@@ -36,7 +37,6 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
     const [leaveConfirm, setLeaveConfirm] = useState(false)
     const [membersLoading, setMembersLoading] = useState(false)
     const [replyTo, setReplyTo] = useState<ReplyReference | null>(null)
-    const [callMode, setCallMode] = useState<"voice" | "video" | null>(null)
 
     useEffect(() => {
         if (!chat) return
@@ -130,8 +130,8 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
                 <div className="chat-header-actions">
                     <button type="button" className="chat-tools-trigger" title="Công cụ tin nhắn" aria-label="Mở công cụ tin nhắn" aria-expanded={toolsOpen} onClick={() => setToolsOpen(old => !old)}><i className="bi bi-sliders" /> <span>Công cụ</span></button>
                     {chat.kind === 'people' && <button type="button" aria-label="Kiểm tra trạng thái hoạt động" title="Kiểm tra online ngay và xem lỗi nếu API không phản hồi" disabled={presenceChecking} onClick={() => void onCheckPresence?.(chat.id)}><i className={`bi bi-${presenceChecking ? 'hourglass-split' : 'arrow-clockwise'}`} /></button>}
-                    <button type="button" title="Gọi thoại" aria-label="Gọi thoại" onClick={() => setCallMode("voice")}><i className="bi bi-telephone" /></button>
-                    <button type="button" title="Gọi video" aria-label="Gọi video" onClick={() => setCallMode("video")}><i className="bi bi-camera-video" /></button>
+                    <button type="button" title="Gọi thoại" aria-label="Gọi thoại" disabled={chat.kind === "group"} onClick={() => requestCall(chat.name,"voice")}><i className="bi bi-telephone" /></button>
+                    <button type="button" title="Gọi video" aria-label="Gọi video" disabled={chat.kind === "group"} onClick={() => requestCall(chat.name,"video")}><i className="bi bi-camera-video" /></button>
                     <button type="button" className="chat-profile-btn" onClick={() => { void openDetails(); }}><i className="bi bi-person-circle" /> <span>{chat.kind === "group" ? "Thông tin nhóm" : "Xem trang cá nhân"}</span></button>
                 </div>
             </header>
@@ -194,16 +194,6 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
                     <button className="lyra-main-action" onClick={() => setDetailOpen(false)}><i className="bi bi-chat-dots" /> Quay lại trò chuyện</button>
                 </section>
             </div>}
-            {callMode && <div className="lyra-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setCallMode(null) }}>
-                <section className="lyra-call-card" role="dialog" aria-modal="true" aria-label="Thông tin cuộc gọi">
-                    <button className="lyra-icon-close" onClick={() => setCallMode(null)} aria-label="Đóng"><i className="bi bi-x-lg" /></button>
-                    <div className="lyra-call-symbol"><i className={`bi bi-${callMode === "video" ? "camera-video" : "telephone"}`} /></div>
-                    <h2>{callMode === "video" ? "Gọi video" : "Gọi thoại"}</h2>
-                    <p>Cuộc gọi đến <strong>{chat.name}</strong> chưa thể bắt đầu. API hiện tại chưa cung cấp tín hiệu thiết lập cuộc gọi WebRTC.</p>
-                    <button className="lyra-main-action" onClick={() => setCallMode(null)}>Đã hiểu</button>
-                </section>
-            </div>}
-
             <MessageList
                 key={`${currentUserId}:${chat.id}`}
                 chatId={chat.id}

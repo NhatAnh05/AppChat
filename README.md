@@ -62,3 +62,7 @@ Xem hướng dẫn thử nghiệm và giới hạn: [docs/GIAI_DOAN_2_TIEN_ICH_T
 ## Nâng cấp Giai đoạn 3–5 và sửa lỗi lịch sử
 
 Xem [`docs/GIAI_DOAN_3_4_5_KHAC_PHUC.md`](docs/GIAI_DOAN_3_4_5_KHAC_PHUC.md) để biết các thay đổi, hướng dẫn chạy WebStorm và checklist test với hai tài khoản. Khi server báo `ACTION_NOT_EXIT`, frontend chỉ thử một tên event lịch sử dự phòng và dừng thử tự động nếu không hỗ trợ; chức năng lịch sử vẫn phụ thuộc máy chủ.
+
+## Gọi thoại & video call WebRTC (local)
+
+Chạy `npm run dev:full` để khởi động ứng dụng, media server và signaling server. Gọi 1-1 bằng các nút điện thoại / camera trên thanh tiêu đề chat. Xem [`HUONG_DAN_GOI_THOAI_VIDEO.md`](HUONG_DAN_GOI_THOAI_VIDEO.md) về kiểm thử, quyền micro/camera và điều kiện triển khai thực tế. Signaling demo không có xác thực danh tính; tuyệt đối không public nguyên trạng.
