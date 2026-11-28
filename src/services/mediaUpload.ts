@@ -1,12 +1,21 @@
+import { assertCurrentSession, currentSessionSignal } from './sessionScope.ts';
 import type { LyraMedia, LyraMediaKind } from "./mediaMessage";
 import { isSafeMediaUrl } from "./mediaMessage";
 
 // Tải file trực tiếp vào máy chủ media đi kèm dự án, không dùng Cloudinary.
 // Trong môi trường phát triển, Vite proxy /api/media đến http://127.0.0.1:8787.
-const endpoint = "/api/media/files";
+function mediaEndpoint(user: string, target: string, isGroup: boolean): string {
+  const normalized = [user.trim().toLowerCase(), target.trim().toLowerCase()];
+  const scope = isGroup ? ['room', normalized[1]] : ['people', ...normalized.sort()];
+  const bytes = new TextEncoder().encode(JSON.stringify(scope));
+  const encoded = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return `/api/media/files/${encoded}`;
+}
 export const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
-export async function uploadMedia(file: File, kind: LyraMediaKind): Promise<LyraMedia> {
+export async function uploadMedia(file: File, kind: LyraMediaKind, user: string, target: string, isGroup: boolean, session = currentSessionSignal()): Promise<LyraMedia> {
+  assertCurrentSession(session);
+  const endpoint = mediaEndpoint(user, target, isGroup);
   if (file.size > MAX_FILE_SIZE) throw new Error("Tệp vượt quá 25 MB.");
   if (kind === "image" && !file.type.startsWith("image/")) throw new Error("Hãy chọn tệp ảnh.");
   if (kind === "video" && !file.type.startsWith("video/")) throw new Error("Hãy chọn tệp video.");
@@ -16,20 +25,24 @@ export async function uploadMedia(file: File, kind: LyraMediaKind): Promise<Lyra
   try {
     response = await fetch(endpoint, {
       method: "POST",
+      credentials: "same-origin",
+      signal: session,
       headers: {
         "Content-Type": file.type || "application/octet-stream",
         "X-File-Name": encodeURIComponent(file.name),
-        "X-Lyra-Upload": "1",
       },
       body: file,
     });
   } catch {
+    assertCurrentSession(session);
     throw new Error("Không kết nối được máy chủ lưu tệp. Hãy chạy npm run dev:full.");
   }
   const body: unknown = await response.json().catch(() => null);
+  assertCurrentSession(session);
   const data = body && typeof body === "object" ? body as { path?: string; error?: string } : {};
   if (!response.ok || !data.path) {
-    if (response.status === 404 || response.status === 502 || response.status === 503) {
+    if (response.status === 401 || response.status === 403 || response.status === 503) throw new Error(data.error || "Chưa có phiên xác thực media hoặc cổng phân quyền chưa được cấu hình.");
+    if (response.status === 404 || response.status === 502) {
       throw new Error(`Máy chủ lưu tệp không khả dụng (HTTP ${response.status}). Chạy npm run dev:full, kiểm tra http://localhost:5173/api/media/health.`);
     }
     throw new Error(data.error || `Tải tệp thất bại (HTTP ${response.status}).`);
@@ -38,6 +51,7 @@ export async function uploadMedia(file: File, kind: LyraMediaKind): Promise<Lyra
   // Khi triển khai cho nhiều máy, bắt buộc cấu hình HTTPS công khai (cùng reverse-proxy /api/media).
   const publicBase = (import.meta.env.VITE_MEDIA_PUBLIC_BASE_URL || window.location.origin).replace(/\/$/, "");
   const url = new URL(data.path, publicBase).toString();
+  if (new URL(url).origin !== window.location.origin || !data.path.startsWith(`${endpoint}/`)) throw new Error("Media cần cổng xác thực cùng origin.");
   if (!isSafeMediaUrl(url)) throw new Error("Địa chỉ file không an toàn. Máy chủ triển khai phải chạy HTTPS.");
   // Link localhost chỉ hoạt động trên chính máy đang chạy media server.
   // Từ máy hoặc điện thoại khác, URL này sẽ trỏ về thiết bị của người nhận.

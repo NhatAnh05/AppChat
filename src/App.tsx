@@ -1,5 +1,6 @@
+import { currentSessionSignal, isCurrentSession, assertCurrentSession } from './services/sessionScope.ts';
 import { parseChatTime, formatChatTime } from "./utils/chatTime";
-import {useEffect, useMemo, useState, useRef, type FormEvent} from "react";
+import {useCallback, useEffect, useMemo, useState, useRef, type FormEvent} from "react";
 import {useDispatch, useSelector, useStore} from "react-redux";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { ChatList } from "./components/ChatList";
@@ -33,7 +34,7 @@ import {userService} from "./services/userService.ts";
 import { notifyIncomingMessage } from "./services/desktopNotifications.ts";
 import { PRESENCE_REFRESH_MS } from "./services/chatRefreshPolicy.ts";
 import { logoutCurrentSession } from "./services/logoutService.ts";
-import { clearContacts, setContactOnline, clearOnlineStatuses } from "./features/contacts/contactsSlice";
+import { setContactOnline, clearOnlineStatuses } from "./features/contacts/contactsSlice";
 import { getConnectionState, subscribeConnectionState } from "./services/connectionHealth.ts";
 import { getChatUnread, getTotalUnreadForChats, markChatRead, readUnreadLedger, recordIncomingMessage,
     reconcileUnreadMessages, saveUnreadLedger } from "./services/unreadNotifications.ts";
@@ -65,6 +66,7 @@ function mapContactToChat(contact: ContactEntry, kind: "people" | "group"): Chat
 
 function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const dispatch = useDispatch<AppDispatch>();
+    const [session] = useState(currentSessionSignal);
     const navigate = useNavigate();
     const store = useStore<RootState>();
 
@@ -104,8 +106,8 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const historyByChat = useSelector((state: RootState) => state.messages.historyByChat);
     useEffect(() => websocketService.onStatus(setConnectionStatus), []);
     useEffect(() => {
-        if (connectionStatus !== 'CONNECTED') dispatch(clearOnlineStatuses());
-    }, [connectionStatus, dispatch]);
+        if (isCurrentSession(session) && connectionStatus !== 'CONNECTED') dispatch(clearOnlineStatuses());
+    }, [connectionStatus, dispatch, session]);
     useEffect(() => subscribeConnectionState(state => {
         setAuthConnectionState(state);
         if (state === 'signed-out') {
@@ -131,6 +133,9 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const baselineReady = contactsInitialized && loadedChatIds.length > 0;
     useEffect(() => {
         const visible = document.visibilityState === 'visible' && document.hasFocus();
+        // The ledger is persistent event history, not derived display state. Reconcile
+        // committed Redux snapshots and browser visibility after each relevant update.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- Synchronize the persistent unread ledger with external history.
         setUnreadLedger(previous => reconcileUnreadMessages(previous, messages, currentUserId,
             loadedChatIds, baselineReady, selectedChat?.id ?? null, visible));
     }, [messages, currentUserId, loadedChatIds, baselineReady, selectedChat?.id]);
@@ -153,7 +158,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
 
     // Receive forwarded 1-1 messages; outgoing acknowledgements are handled by peopleChatService.
     useEffect(() => websocketService.on("SEND_CHAT", (message) => {
-        if (message.status === "error") return;
+        if (!isCurrentSession(session) || !websocketService.isAuthenticated() || message.status === "error") return;
 
         const data = message.data as {
             id?: string | number;
@@ -213,14 +218,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         dispatch(addMessage(incomingMessage));
         notifyIncomingMessage(currentUserId, incomingMessage.senderName ?? incomingMessage.senderId,
             `${incomingMessage.chatId}:${incomingMessage.id}`);
-    }), [currentUserId, dispatch, friends, groups, selectedChat?.id, store]);
-
-    // Socket sau RE_LOGIN là một socket mới: cập nhật danh bạ từ Backend khi kết nối hồi phục.
-    useEffect(() => {
-        if (connectionStatus === 'CONNECTED') void refreshUserList();
-        // Callback intentionally uses the latest store when invoked.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [connectionStatus]);
+    }), [currentUserId, dispatch, friends, groups, selectedChat?.id, store, session]);
 
     // Explicit check allows a user to verify the teacher server's real response.
     // No simulated/guessed Online state when the server does not answer.
@@ -228,7 +226,9 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         setPresenceError(null);
         setPresenceChecking(true);
         try {
+            assertCurrentSession(session);
             const online = await userService.checkUserOnline(username);
+            assertCurrentSession(session);
             dispatch(setContactOnline({ id: username, online }));
             return online;
         } catch (error) {
@@ -249,13 +249,13 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         let cancelled = false;
         let checking = false;
         const checkActive = async () => {
-            if (cancelled || checking || !websocketService.isAuthenticated() ||
+            if (!isCurrentSession(session) || cancelled || checking || !websocketService.isAuthenticated() ||
                 userService.isOnlineCheckUnsupported() || !navigator.onLine ||
                 document.visibilityState !== 'visible') return;
             checking = true;
             try {
                 const online = await userService.checkUserOnline(activeId);
-                if (!cancelled && websocketService.isAuthenticated()) {
+                if (!cancelled && isCurrentSession(session) && websocketService.isAuthenticated()) {
                     dispatch(setContactOnline({id: activeId, online}));
                     setPresenceError(null);
                 }
@@ -268,7 +268,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         void checkActive();
         const interval = window.setInterval(() => void checkActive(), PRESENCE_REFRESH_MS);
         return () => { cancelled = true; window.clearInterval(interval); };
-    }, [currentUserId, connectionStatus, contactsInitialized, selectedChat?.id, selectedChat?.kind, dispatch]);
+    }, [currentUserId, connectionStatus, contactsInitialized, selectedChat?.id, selectedChat?.kind, dispatch, session]);
 
     // Không tải lịch sử của toàn bộ danh bạ khi đăng nhập.
     // CHAT_PEOPLE_GET_MES không có request ID nên các yêu cầu phải tuần tự;
@@ -290,11 +290,13 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         return contactChats;
     }, [friends, groups, selectedChat]);
 
-    const refreshUserList = async () => {
+    const refreshUserList = useCallback(async () => {
+        if (!isCurrentSession(session)) return;
         dispatch(setContactsLoading(true));
         dispatch(setContactsError(null));
         try {
             const items = await contactService.getUserList();
+            assertCurrentSession(session);
 
             const serverFriends = items
                 .filter(item => item.type === 0)
@@ -327,13 +329,17 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
 
         } catch (error) {
             const message = error instanceof Error ? error.message : "Không tải được danh bạ.";
-            dispatch(setContactsError(message));
+            if (isCurrentSession(session)) dispatch(setContactsError(message));
             console.error("Không thể cập nhật danh sách:", error);
         } finally {
-            dispatch(setContactsLoading(false));
-            setContactsInitialized(true);
+            if (isCurrentSession(session)) {dispatch(setContactsLoading(false)); setContactsInitialized(true);}
         }
-    };
+    }, [dispatch, store, session]);
+
+    // Socket sau RE_LOGIN là một socket mới: cập nhật danh bạ khi kết nối hồi phục.
+    useEffect(() => {
+        if (connectionStatus === 'CONNECTED') void refreshUserList();
+    }, [connectionStatus, refreshUserList]);
 
     // Tìm tin nhắn mới nhất và lọc theo tên cuộc trò chuyện
     // Sắp xếp theo hoạt động mới nhất và không để các gói reaction nội bộ
@@ -380,7 +386,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     }, [selectedChat, friends]);
 
     const handleLogout = async () => {
-        if (logoutBusy) return;
+        if (logoutBusy || !isCurrentSession(session)) return;
         setLogoutBusy(true);
         try {
             const result = await logoutCurrentSession();
@@ -388,15 +394,15 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                 console.warn(`Đã đăng xuất cục bộ; backend chưa xác nhận (${result.reason}).`);
             }
         } finally {
-            dispatch(clearCredentials());
-            dispatch(clearContacts());
-            navigate("/login", { replace: true });
+            // signed-out connection event atomically clears Redux; an old logout
+            // completion must not clear a newer login.
             setLogoutBusy(false);
         }
     };
 
     // Xóa dữ liệu nhóm trên giao diện CHỈ sau khi OUT_ROOM được máy chủ xác nhận.
     const onGroupLeft = (roomName: string) => {
+        if (!isCurrentSession(session)) return;
         dispatch(removeGroup(roomName));
         dispatch(clearConversationMessages(roomChatId(roomName)));
         setUnreadLedger(previous => markChatRead(previous, roomChatId(roomName)));
@@ -406,7 +412,9 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     };
 
     const leaveGroupFromDashboard = async (roomName: string) => {
+        assertCurrentSession(session);
         await leaveRoom(roomName);
+        assertCurrentSession(session);
         onGroupLeft(roomName);
     };
 
@@ -428,13 +436,14 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const handleComposeSubmit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         const value = composeValue.trim();
-        if (!value || composeBusy) return;
+        if (!isCurrentSession(session) || !value || composeBusy) return;
         setComposeBusy(true);
         setComposeError("");
         try {
             if (composeMode === "group" || composeMode === "join") {
                 // The group is added only after CREATE_ROOM / JOIN_ROOM success from Backend.
                 const created = composeMode === "group" ? await createRoom(value) : await joinRoom(value);
+                assertCurrentSession(session);
                 const contact = makeGroupContact(created);
                 dispatch(addGroup(contact));
                 openGroup(contact);
@@ -455,13 +464,14 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         let cancelled = false;
 
         const loadContacts = async () => {
+            if (!isCurrentSession(session)) return;
             dispatch(setContactsLoading(true));
             dispatch(setContactsError(null));
 
             try {
                 const items = await contactService.getUserList();
 
-                if (cancelled) return;
+                if (cancelled || !isCurrentSession(session)) return;
 
                 const friends = items
                     .filter(item => item.type === 0)
@@ -487,7 +497,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                 dispatch(setGroups(groups));
 
             } catch (error) {
-                if (!cancelled) {
+                if (!cancelled && isCurrentSession(session)) {
                     dispatch(
                         setContactsError(
                             error instanceof Error
@@ -497,7 +507,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                     );
                 }
             } finally {
-                if (!cancelled) {
+                if (!cancelled && isCurrentSession(session)) {
                     dispatch(setContactsLoading(false));
                     setContactsInitialized(true);
                 }
@@ -509,12 +519,12 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         return () => {
             cancelled = true;
         };
-    }, [dispatch, store]);
+    }, [dispatch, store, session]);
 
     const handleSearchUser = async (username: string) => {
         const user = username.trim();
 
-        if (!user || searchingUser) return;
+        if (!isCurrentSession(session) || !user || searchingUser) return;
 
         if (user.toLowerCase() === currentUserId.toLowerCase()) {
             alert("Bạn không thể tìm chính mình.");
@@ -525,6 +535,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
 
         try {
             const exists = await userService.checkUserExist(user);
+            assertCurrentSession(session);
 
             if (!exists) {
                 alert("Không tìm thấy tài khoản.");
@@ -539,6 +550,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                 online = undefined;
             }
 
+            assertCurrentSession(session);
             const chat: Chat = {
                 id: user,
                 name: user,
@@ -589,7 +601,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         // Chỉ làm mới cuộc trò chuyện đang xem. Không đưa tất cả bạn bè
         // vào hàng đợi lịch sử trên cùng một WebSocket.
         await refreshUserList();
-        if (!selectedChat) return;
+        if (!isCurrentSession(session) || !selectedChat) return;
         if (selectedChat.kind === 'people') {
             await dispatch(fetchPeopleChatHistory({
                 username: selectedChat.name, chatId: selectedChat.id, page: 1, force: true,
@@ -601,6 +613,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     };
 
     const exportHistory = () => {
+        if (!isCurrentSession(session)) return;
         const data = {format: "lyrachat-local-history-v1", exportedAt: new Date().toISOString(), userId: currentUserId, messages: store.getState().messages.messages};
         const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type: "application/json"}));
         const anchor = document.createElement("a");
@@ -617,6 +630,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             if (backup.format !== "lyrachat-local-history-v1" || backup.userId !== currentUserId || !Array.isArray(backup.messages) || backup.messages.length > 200000) throw new Error("Tệp sao lưu không hợp lệ hoặc không thuộc tài khoản hiện tại.");
             const valid = backup.messages.every(item => item && typeof item === "object" && typeof item.id === "string" && typeof item.chatId === "string" && typeof item.senderId === "string" && typeof item.content === "string" && typeof item.createdAt === "string");
             if (!valid) throw new Error("Dữ liệu tin nhắn không đúng định dạng.");
+            assertCurrentSession(session);
             dispatch(importLocalMessages(backup.messages as RootState["messages"]["messages"]));
             alert("Đã nhập lịch sử vào phiên hiện tại. Dữ liệu không được tải lên máy chủ.");
         } catch(error) { alert(error instanceof Error ? error.message : "Không đọc được tệp sao lưu."); }
@@ -717,7 +731,7 @@ function ProtectedChatRoute() {
     const { isAuthenticated, userId } = useSelector((state: RootState) => state.auth);
 
     return isAuthenticated && userId ? (
-        <ChatWorkspace currentUserId={userId} />) : (<Navigate to="/login" replace />);
+        <ChatWorkspace key={userId} currentUserId={userId} />) : (<Navigate to="/login" replace />);
 }
 
 function AppRoutes() {

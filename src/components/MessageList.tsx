@@ -1,3 +1,4 @@
+import { currentSessionSignal, assertCurrentSession, isCurrentSession } from '../services/sessionScope.ts';
 import { parseChatTime } from "../utils/chatTime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
@@ -29,6 +30,7 @@ type ForwardTarget = {id: string; name: string; kind: 'people' | 'group'};
 
 export default function MessageList({ chatId, currentUserId, username, isPeopleChat, onReply, toolsOpen = false, onCloseTools }: MessageListProps) {
   const dispatch = useDispatch<AppDispatch>();
+  const [workspaceSession] = useState(currentSessionSignal);
   const [pending, setPending] = useState<ReactionEvent[]>([]);
   const [reactionError, setReactionError] = useState<string | null>(null);
   const pendingRef = useRef<ReactionEvent[]>([]);
@@ -86,14 +88,18 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
     updatePending([...pendingRef.current, event]);
     setReactionError(null);
     const content = makeReaction(targetId, emoji, operation);
+    const session = workspaceSession;
+    if (!isCurrentSession(session)) return;
     void (async () => {
       try {
         if (isPeopleChat) {
-          const confirmed = await peopleChatService.sendMessage(currentUserId, chatId, content, []);
+          const confirmed = await peopleChatService.sendMessage(currentUserId, chatId, content, messages.filter(m=>m.chatId===chatId).map(m=>m.id));
           if (!confirmed) throw new Error('Máy chủ chưa xác nhận cảm xúc.');
+          assertCurrentSession(session);
           dispatch(addMessage(confirmed));
         } else {
           const confirmed = await sendRoomMessage(roomNameFromChatId(chatId), content);
+          assertCurrentSession(session);
           dispatch(addMessage({...confirmed, orderAt:new Date().toISOString()}));
         }
       } catch (error) {
@@ -122,6 +128,7 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
     nearBottomRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 160;
   };
   const loadPage = (page: number) => {
+    if (!isCurrentSession(workspaceSession)) return;
     void dispatch(isPeopleChat ? fetchPeopleChatHistory({username, chatId, page}) : fetchRoomChatHistory({username, chatId, page}));
   };
 
@@ -142,15 +149,20 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
     if (contents.some(c => !c)) { setFeedback('Có tin nhắn không thể chuyển tiếp (quá dài hoặc không hợp lệ).'); return; }
     setForwardBusy(true);
     let completed = 0;
+    const session = workspaceSession;
+    if (!isCurrentSession(session)) return;
     try {
       for (const content of contents) {
+        assertCurrentSession(session);
         if (!content) continue;
         if (target.kind === 'group') {
           const confirmed = await sendRoomMessage(target.name, content);
+          assertCurrentSession(session);
           dispatch(addMessage({...confirmed, chatId:roomChatId(target.name), orderAt:new Date().toISOString()}));
         } else {
-          const confirmed = await peopleChatService.sendMessage(currentUserId, target.id, content, []);
+          const confirmed = await peopleChatService.sendMessage(currentUserId, target.id, content, messages.filter(m=>m.chatId===target.id).map(m=>m.id));
           if (!confirmed) throw new Error('Máy chủ chưa xác nhận chuyển tiếp.');
+          assertCurrentSession(session);
           dispatch(addMessage(confirmed));
         }
         completed++;

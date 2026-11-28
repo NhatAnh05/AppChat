@@ -1,3 +1,4 @@
+import { currentSessionSignal, assertCurrentSession } from './sessionScope.ts';
 import { websocketService } from './websocket.ts';
 import { ensureLoginConnection } from './loginService.ts';
 
@@ -16,11 +17,14 @@ export function parseUserList(payload: unknown): UserListItem[] | null {
 }
 
 let pendingList: Promise<UserListItem[]> | null = null;
+let pendingSession: AbortSignal | undefined;
 async function requestList(): Promise<UserListItem[]> {
-    await ensureLoginConnection();
+    const session=currentSessionSignal();
+    await ensureLoginConnection(session);
+    assertCurrentSession(session);
     return new Promise<UserListItem[]>((resolve, reject) => {
         let finished = false;
-        const cleanup = () => { clearTimeout(timeout); offMessage(); offStatus(); };
+        const cleanup = () => { clearTimeout(timeout); offMessage(); offStatus(); session.removeEventListener('abort',abort); };
         const finish = (error?: Error, data?: UserListItem[]) => {
             if (finished) return;
             finished = true; cleanup();
@@ -35,6 +39,8 @@ async function requestList(): Promise<UserListItem[]> {
         const offStatus = websocketService.onStatus(status => {
             if (status === 'DISCONNECTED' || status === 'ERROR') finish(new Error('Mất kết nối khi tải danh bạ.'));
         });
+        const abort=()=>finish(new Error('Phiên đăng nhập đã thay đổi.'));
+        session.addEventListener('abort',abort,{once:true});
         const timeout = setTimeout(() => finish(new Error('Hết thời gian chờ GET_USER_LIST.')), 10000);
         try { websocketService.send('GET_USER_LIST', {}); }
         catch(error) { finish(error instanceof Error ? error : new Error('Không thể gửi GET_USER_LIST.')); }
@@ -43,7 +49,9 @@ async function requestList(): Promise<UserListItem[]> {
 
 export const contactService = {
     getUserList(): Promise<UserListItem[]> {
-        if (pendingList) return pendingList;
+        const session=currentSessionSignal();
+        if (pendingList && pendingSession===session) return pendingList;
+        pendingSession=session;
         const task = requestList();
         pendingList = task;
         void task.finally(() => { if (pendingList === task) pendingList = null; }).catch(() => undefined);

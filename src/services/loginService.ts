@@ -1,3 +1,4 @@
+import { currentSessionSignal, assertCurrentSession, rotateSessionScope } from './sessionScope.ts';
 import { CHAT_WS_URL, websocketService } from './websocket.ts';
 import { getConnectionState, setConnectionState } from './connectionHealth.ts';
 import { clearLoginSession, readLoginSession, saveLoginSession, type SavedLoginSession } from './sessionStore.ts';
@@ -7,6 +8,7 @@ const LOGIN_TIMEOUT = 12000;
 const RETRY_DELAY_START_MS = 20_000;
 const RETRY_DELAY_MAX_MS = 120_000;
 let activeSocket: WebSocket | null = null;
+let activeUsername: string | null = null;
 let pendingRecovery: Promise<SavedLoginSession | null> | null = null;
 let recoveryAbort: AbortController | null = null;
 let generation = 0;
@@ -52,9 +54,14 @@ export function getAuthenticatedSocket(): WebSocket | null {
   return !signingOut && activeSocket?.readyState === WebSocket.OPEN ? activeSocket : null;
 }
 
+export function getAuthenticatedUsername(): string | null {
+  return getAuthenticatedSocket() ? activeUsername : null;
+}
+
 function activate(socket: WebSocket, session: SavedLoginSession, token: number): void {
   if (token !== generation || signingOut) { socket.close(); return; }
   activeSocket = socket;
+  activeUsername = session.username;
   cancelScheduledRetry();
   nextRetryDelayMs = RETRY_DELAY_START_MS;
   saveLoginSession(session);
@@ -136,7 +143,10 @@ export function restoreLoginSession(): Promise<SavedLoginSession | null> {
   if (getAuthenticatedSocket()) return Promise.resolve(readLoginSession());
   if (pendingRecovery) return pendingRecovery;
   const session = readLoginSession();
-  if (!session) { setConnectionState('signed-out'); return Promise.resolve(null); }
+  if (!session) {
+    if (getConnectionState() !== 'signed-out') { generation++; rotateSessionScope(); }
+    setConnectionState('signed-out'); return Promise.resolve(null);
+  }
   cancelScheduledRetry();
   const token = generation;
   const controller = new AbortController();
@@ -170,6 +180,8 @@ export function restoreLoginSession(): Promise<SavedLoginSession | null> {
       if (backendRejectedSession || !readLoginSession()) {
         // Explicit server rejection or expired local credentials: sign out.
         cancelScheduledRetry();
+        rotateSessionScope();
+        generation++;
         clearLoginSession();
         setConnectionState('signed-out');
       } else {
@@ -189,10 +201,12 @@ export function restoreLoginSession(): Promise<SavedLoginSession | null> {
   return work;
 }
 
-export async function ensureLoginConnection(): Promise<void> {
+export async function ensureLoginConnection(signal = currentSessionSignal()): Promise<void> {
+  assertCurrentSession(signal);
   if (getAuthenticatedSocket()) return;
   if (getConnectionState() === 'signing-out' || signingOut) throw new Error('Đang đăng xuất.');
   const result = await restoreLoginSession();
+  assertCurrentSession(signal);
   if (!result || !getAuthenticatedSocket()) {
     if (getConnectionState() === 'offline' || getConnectionState() === 'reconnecting') {
       throw new Error('Tạm mất kết nối máy chủ. Phiên đăng nhập được giữ lại và ứng dụng sẽ tự thử kết nối lại.');
@@ -205,10 +219,13 @@ export async function ensureLoginConnection(): Promise<void> {
 export function beginLogoutSession(): WebSocket | null {
   signingOut = true;
   generation++;
+  rotateSessionScope();
   cancelScheduledRetry();
   recoveryAbort?.abort();
+  pendingRecovery = null;
   const current = getAuthenticatedSocketUnsafe();
   activeSocket = null;
+  activeUsername = null;
   setConnectionState('signing-out');
   websocketService.lockAuthenticatedOperations();
   return current;
@@ -219,11 +236,14 @@ function getAuthenticatedSocketUnsafe(): WebSocket | null {
 export function disconnectLoginSession(): void {
   signingOut = true;
   generation++;
+  rotateSessionScope();
   cancelScheduledRetry();
   nextRetryDelayMs = RETRY_DELAY_START_MS;
   recoveryAbort?.abort();
+  pendingRecovery = null;
   const old = activeSocket;
   activeSocket = null;
+  activeUsername = null;
   clearLoginSession();
   websocketService.disconnect();
   if (old && old.readyState === WebSocket.OPEN) old.close();

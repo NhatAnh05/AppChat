@@ -15,7 +15,7 @@ export function normalizeRoomName(name: string): string {
   const normalized = name.trim();
   if (!normalized) throw new Error('Vui lòng nhập tên nhóm.');
   if (normalized.length > 80) throw new Error('Tên nhóm không được vượt quá 80 ký tự.');
-  if (/[\u0000-\u001f\u007f]/.test(normalized)) throw new Error('Tên nhóm chứa ký tự không hợp lệ.');
+  if (Array.from(normalized).some(char => { const code = char.charCodeAt(0); return code <= 31 || code === 127; })) throw new Error('Tên nhóm chứa ký tự không hợp lệ.');
   return normalized;
 }
 

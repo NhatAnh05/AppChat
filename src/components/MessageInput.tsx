@@ -1,7 +1,8 @@
+import { currentSessionSignal, assertCurrentSession, isCurrentSession } from '../services/sessionScope.ts';
 import { type FormEvent, useState, useEffect, useRef } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { addMessage, removeMessage, replaceMessage } from "../features/messages/messagesSlice";
-import { peopleChatService } from "../services/peopleChatService";
+import { addMessage, removeMessage, replaceMessage, fetchPeopleChatHistory } from "../features/messages/messagesSlice";
+import { peopleChatService, UnconfirmedSendError } from "../services/peopleChatService";
 import { sendRoomMessage } from "../services/roomChatService.ts";
 import { roomNameFromChatId } from "../services/roomChatProtocol.ts";
 import { uploadMedia } from "../services/mediaUpload";
@@ -21,6 +22,7 @@ type MessageInputProps = {
 };
 
 export default function MessageInput({ chatId, currentUserId, onMessageSent, isGroup = false, replyTo, mentionRequest, onCancelReply }: MessageInputProps) {
+  const [workspaceSession] = useState(currentSessionSignal);
   const [content, setContent] = useState(() => readDraft(currentUserId, chatId));
   // Tự động lưu bản nháp theo tài khoản/hội thoại ngay khi nội dung thay đổi.
   useEffect(() => saveDraft(currentUserId, chatId, content), [currentUserId, chatId, content]);
@@ -93,7 +95,8 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
   const dispatch = useDispatch<AppDispatch>();
   const messages = useSelector((state: RootState) => state.messages.messages);
 
-  const sendContent = async (value: string, clearInput = false) => {
+  const sendContent = async (value: string, clearInput = false, session = workspaceSession) => {
+    assertCurrentSession(session);
     const trimmedContent = value.trim();
     if (!trimmedContent) return;
     if (isGroup) {
@@ -103,6 +106,7 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
       if (clearInput) setContent('');
       try {
         const confirmed = await sendRoomMessage(roomNameFromChatId(chatId), trimmedContent);
+        assertCurrentSession(session);
         dispatch(addMessage({...confirmed, orderAt:new Date().toISOString()}));
         onMessageSent?.();
         if (clearInput) onCancelReply?.();
@@ -123,13 +127,17 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
     }));
     try {
       const confirmed = await peopleChatService.sendMessage(currentUserId, chatId, trimmedContent, knownMessageIds);
+      assertCurrentSession(session);
       if (!confirmed) throw new Error("Máy chủ chưa xác nhận tin nhắn. Không thể coi đây là gửi thành công.");
       dispatch(replaceMessage({ id: optimisticId, message: { ...confirmed, orderAt: sentAt } }));
       onMessageSent?.();
       if (clearInput) onCancelReply?.();
     } catch (error) {
-      dispatch(removeMessage({ chatId, id: optimisticId }));
-      if (clearInput) setContent(previous => previous || trimmedContent);
+      if (isCurrentSession(session)) dispatch(removeMessage({ chatId, id: optimisticId }));
+      if (error instanceof UnconfirmedSendError && isCurrentSession(session)) {
+        // Server history is displayed as history, never as proof of this send.
+        void dispatch(fetchPeopleChatHistory({username:chatId,chatId,page:1,force:true}));
+      } else if (clearInput) setContent(previous => previous || trimmedContent);
       throw error;
     }
   };
@@ -152,11 +160,13 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
   };
 
   const handleMediaFile = async (file?: File) => {
-    if (!file || uploading) return;
+    if (!file || uploading || !isCurrentSession(workspaceSession)) return;
     setUploading(true);
+    const session = workspaceSession;
     try {
-      const media = await uploadMedia(file, selectedKind.current);
-      await sendContent(encodeMediaMessage(media));
+      const media = await uploadMedia(file, selectedKind.current, currentUserId, isGroup ? roomNameFromChatId(chatId) : chatId, isGroup, session);
+      assertCurrentSession(session);
+      await sendContent(encodeMediaMessage(media), false, session);
     } catch (error) {
       setInputError(error instanceof Error ? error.message : "Không gửi được tệp.");
     } finally { setUploading(false); }

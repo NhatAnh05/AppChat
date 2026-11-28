@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useRef, useState} from 'react';
+import {useCallback, useEffect, useLayoutEffect, useRef, useState} from 'react';
 import type {CallMode,CallRequest} from '../services/callEvents';
 
 type Signal = {type:string; callId?:string; from?:string; to?:string; mode?:CallMode; message?:string; sdp?:RTCSessionDescriptionInit; candidate?:RTCIceCandidateInit};
@@ -12,6 +12,7 @@ export default function CallOverlay({username}:{username:string}) {
   const [connected,setConnected]=useState(false);
   const [muted,setMuted]=useState(false);
   const [cameraOff,setCameraOff]=useState(false);
+  const [mediaReady,setMediaReady]=useState(false);
   const ws=useRef<WebSocket|null>(null);
   const pc=useRef<RTCPeerConnection|null>(null);
   const local=useRef<MediaStream|null>(null);
@@ -41,7 +42,7 @@ export default function CallOverlay({username}:{username:string}) {
     ringingTimeout.current=null;
     if(mediaPermissionTimer.current)clearTimeout(mediaPermissionTimer.current);
     mediaPermissionTimer.current=null;
-    setMuted(false);setCameraOff(false);
+    setMuted(false);setCameraOff(false);setMediaReady(false);
   };
   const end=useCallback((notify=true)=>{
     const active=current.current;
@@ -52,13 +53,14 @@ export default function CallOverlay({username}:{username:string}) {
   const getMedia=async(mode:CallMode)=>{
     if(!navigator.mediaDevices?.getUserMedia)throw new Error('Trình duyệt cần HTTPS hoặc localhost để sử dụng micro/camera.');
     const stream=await navigator.mediaDevices.getUserMedia({audio:true,video:mode==='video'});
-    local.current=stream;
-    if(localVideo.current)localVideo.current.srcObject=stream;
     return stream;
   };
   const createPeer=async(mode:CallMode,callId:string)=>{
     const stream=await getMedia(mode);
-    if(current.current.callId!==callId){stream.getTracks().forEach(t=>t.stop());throw new Error('Cuộc gọi đã kết thúc.');}
+    if(!mounted.current || current.current.callId!==callId){stream.getTracks().forEach(t=>t.stop());throw new Error('Cuộc gọi đã kết thúc.');}
+    local.current=stream;
+    if(localVideo.current)localVideo.current.srcObject=stream;
+    setMediaReady(true);
     const conn=new RTCPeerConnection({iceServers});
     pc.current=conn;
     const incoming=new MediaStream();remote.current=incoming;
@@ -128,7 +130,9 @@ export default function CallOverlay({username}:{username:string}) {
       }
     }catch(err){fail(mediaError(err));}
   };
-  const onSignalRef=useRef(onSignal);onSignalRef.current=onSignal;
+  const onSignalRef=useRef(onSignal);
+  // Update after commit, before WebSocket callbacks observe the new render.
+  useLayoutEffect(()=>{onSignalRef.current=onSignal;});
   useEffect(()=>{
     mounted.current=true; ready.current=false;
     const connect=()=>{
@@ -137,7 +141,7 @@ export default function CallOverlay({username}:{username:string}) {
       const socket=new WebSocket(`${protocol}//${location.host}/api/calls/ws?user=${encodeURIComponent(username)}`);
       ws.current=socket;
       socket.onopen=()=>{if(ws.current===socket){ready.current=true;setConnected(true);}};
-      socket.onmessage=e=>{try{void onSignalRef.current(JSON.parse(String(e.data)) as Signal);}catch{/* malformed */}};
+      socket.onmessage=e=>{if(ws.current!==socket || !mounted.current)return;try{void onSignalRef.current(JSON.parse(String(e.data)) as Signal);}catch{/* malformed */}};
       socket.onclose=()=>{
         if(ws.current!==socket)return;
         ready.current=false;setConnected(false);
@@ -181,7 +185,7 @@ export default function CallOverlay({username}:{username:string}) {
         {state.mode==='video' && <div className="lyra-call-videos"><video ref={remoteVideo} autoPlay playsInline className="lyra-remote-video"/><video ref={localVideo} autoPlay playsInline muted className="lyra-local-video"/></div>}
         {state.mode==='voice' && <audio ref={remoteAudio} autoPlay playsInline/>}
         {state.status==='incoming' ? <div className="lyra-call-controls"><button className="lyra-call-danger" onClick={reject}><i className="bi bi-telephone-x"/> Từ chối</button><button className="lyra-call-accept" onClick={()=>void accept()}><i className="bi bi-telephone"/> Trả lời</button></div> :
-        <div className="lyra-call-controls"><button onClick={toggleMic} disabled={!local.current}><i className={`bi bi-mic${muted?'-mute':''}`}/>{muted?'Bật mic':'Tắt mic'}</button>{state.mode==='video' && <button onClick={toggleVideo} disabled={!local.current}><i className={`bi bi-camera-video${cameraOff?'-off':''}`}/>{cameraOff?'Bật camera':'Tắt camera'}</button>}<button className="lyra-call-danger" onClick={()=>end()}><i className="bi bi-telephone-x"/> Kết thúc</button></div>}
+        <div className="lyra-call-controls"><button onClick={toggleMic} disabled={!mediaReady}><i className={`bi bi-mic${muted?'-mute':''}`}/>{muted?'Bật mic':'Tắt mic'}</button>{state.mode==='video' && <button onClick={toggleVideo} disabled={!mediaReady}><i className={`bi bi-camera-video${cameraOff?'-off':''}`}/>{cameraOff?'Bật camera':'Tắt camera'}</button>}<button className="lyra-call-danger" onClick={()=>end()}><i className="bi bi-telephone-x"/> Kết thúc</button></div>}
       </section>
     </div>}
     {state.error && state.status==='idle' && <div className="lyra-call-toast" role="alert"><span>{state.error}</span><button onClick={()=>update(idle)} aria-label="Đóng thông báo"><i className="bi bi-x"/></button></div>}

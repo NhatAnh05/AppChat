@@ -1,10 +1,11 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import type { ChatMessage } from "../../types/chat";
-import { peopleChatService } from "../../services/peopleChatService";
-import { parseChatTime } from "../../utils/chatTime";
+import { peopleChatService } from "../../services/peopleChatService.ts";
+import { parseChatTime } from "../../utils/chatTime.ts";
 import { getRoomHistory } from "../../services/roomChatService.ts";
 
 type ConversationHistoryState = {
+  requestId?: string;
   loading: boolean;
   error: string | null;
   loadedPages: number[];
@@ -60,6 +61,7 @@ const messagesSlice = createSlice({
   name: "messages",
   initialState,
   reducers: {
+    resetMessages: () => initialState,
     addMessage: (state, action: PayloadAction<ChatMessage>) => {
       const alreadyAdded = state.messages.some(
           (message) =>
@@ -119,12 +121,14 @@ const messagesSlice = createSlice({
             loadedPages: [],
             hasMore: false,
           };
+          history.requestId = action.meta.requestId;
           history.loading = true;
           history.error = null;
           state.historyByChat[chatId] = history;
         })
         .addCase(fetchPeopleChatHistory.fulfilled, (state, action) => {
           const { chatId, page, messages } = action.payload;
+          if (state.historyByChat[chatId]?.requestId !== action.meta.requestId) return;
           const history = state.historyByChat[chatId] ?? {
             loading: false,
             error: null,
@@ -169,7 +173,7 @@ const messagesSlice = createSlice({
         .addCase(fetchPeopleChatHistory.rejected, (state, action) => {
           const chatId = action.meta.arg.chatId;
           const history = state.historyByChat[chatId];
-          if (!history) return;
+          if (!history || history.requestId !== action.meta.requestId) return;
           history.loading = false;
           history.error = action.payload ?? action.error.message ?? "Không thể tải lịch sử tin nhắn.";
         })
@@ -181,12 +185,14 @@ const messagesSlice = createSlice({
             loadedPages: [],
             hasMore: false,
           };
+          history.requestId = action.meta.requestId;
           history.loading = true;
           history.error = null;
           state.historyByChat[chatId] = history;
         })
         .addCase(fetchRoomChatHistory.fulfilled, (state, action) => {
           const { chatId, page, messages } = action.payload;
+          if (state.historyByChat[chatId]?.requestId !== action.meta.requestId) return;
           const history = state.historyByChat[chatId] ?? {
             loading: false,
             error: null,
@@ -231,12 +237,12 @@ const messagesSlice = createSlice({
         .addCase(fetchRoomChatHistory.rejected, (state, action) => {
           const chatId = action.meta.arg.chatId;
           const history = state.historyByChat[chatId];
-          if (!history) return;
+          if (!history || history.requestId !== action.meta.requestId) return;
           history.loading = false;
           history.error = action.payload ?? action.error.message ?? "Không thể tải lịch sử tin nhắn.";
         });
   },
 });
 
-export const { addMessage, replaceMessage, removeMessage, clearConversationMessages, deleteMessage, importLocalMessages, invalidateHistory } = messagesSlice.actions;
+export const { resetMessages, addMessage, replaceMessage, removeMessage, clearConversationMessages, deleteMessage, importLocalMessages, invalidateHistory } = messagesSlice.actions;
 export default messagesSlice.reducer;

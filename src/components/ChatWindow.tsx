@@ -1,3 +1,4 @@
+import { currentSessionSignal, isCurrentSession } from '../services/sessionScope.ts';
 import { useEffect, useState } from 'react'
 import { useDispatch } from 'react-redux'
 import { fetchPeopleChatHistory, fetchRoomChatHistory } from '../features/messages/messagesSlice'
@@ -27,8 +28,9 @@ type ChatWindowProps = {
     onOpenSettings?: () => void
 }
 
-export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLeft, onCheckPresence, presenceError, presenceChecking, unreadCount = 0, onOpenNotifications, onCompose, onOpenSettings}: ChatWindowProps) {
+export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLeft, presenceError, unreadCount = 0, onOpenNotifications, onCompose, onOpenSettings}: ChatWindowProps) {
     const dispatch = useDispatch<AppDispatch>()
+    const [session] = useState(currentSessionSignal)
     const [detailOpen, setDetailOpen] = useState(false)
     const [toolsOpen, setToolsOpen] = useState(false)
     const [members, setMembers] = useState<CreatedRoomMember[]>([])
@@ -42,27 +44,32 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
     const [replyTo, setReplyTo] = useState<ReplyReference | null>(null)
     const [callMode, setCallMode] = useState<"voice" | "video" | null>(null)
 
+    const chatId = chat?.id;
+    const chatKind = chat?.kind;
+    const chatName = chat?.name;
+
     useEffect(() => {
-        if (!chat) return
-        void dispatch(chat.kind === 'group' ? fetchRoomChatHistory({username:chat.name,chatId:chat.id,page:1}) : fetchPeopleChatHistory({username: chat.name, chatId: chat.id, page: 1}))
-    }, [chat?.id, chat?.kind, chat?.name, dispatch])
+        if (!chatId || chatName === undefined || !isCurrentSession(session)) return
+        void dispatch(chatKind === 'group' ? fetchRoomChatHistory({username:chatName,chatId:chatId,page:1}) : fetchPeopleChatHistory({username: chatName, chatId: chatId, page: 1}))
+    }, [chatId, chatKind, chatName, dispatch, session])
 
     // Nhận tin mới qua SEND_CHAT. Đồng bộ dự phòng chỉ một lần/phút, KHÔNG gọi
     // thêm mỗi lần cửa sổ focus (Edge thường phát sinh rất nhiều focus events).
     useEffect(() => {
-        if (!chat) return;
+        if (!chatId || chatName === undefined || !isCurrentSession(session)) return;
         const refresh = () => {
-            if (isHistoryUnsupported(chat.kind === 'group' ? 'room' : 'people') ||
+            if (!isCurrentSession(session) || isHistoryUnsupported(chatKind === 'group' ? 'room' : 'people') ||
                 document.visibilityState !== 'visible' || !navigator.onLine || !document.hasFocus()) return;
-            void dispatch(chat.kind === 'group'
-                ? fetchRoomChatHistory({username: chat.name, chatId: chat.id, page: 1, force: true})
-                : fetchPeopleChatHistory({username: chat.name, chatId: chat.id, page: 1, force: true}));
+            void dispatch(chatKind === 'group'
+                ? fetchRoomChatHistory({username: chatName, chatId: chatId, page: 1, force: true})
+                : fetchPeopleChatHistory({username: chatName, chatId: chatId, page: 1, force: true}));
         };
         const interval = window.setInterval(refresh, HISTORY_REFRESH_MS);
         return () => window.clearInterval(interval);
-    }, [chat?.id, chat?.kind, chat?.name, dispatch]);
+    }, [chatId, chatKind, chatName, dispatch, session]);
 
     const openDetails = async () => {
+        if (!isCurrentSession(session)) return;
         setDetailOpen(true);
         setRoomError('');
         setMembers([]);
@@ -92,7 +99,7 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
     };
     const filteredMembers = members.filter(member => normalizeSearch(member.name).includes(normalizeSearch(memberQuery)));
     const handleLeave = async () => {
-        if (!chat || chat.kind !== 'group' || leaveBusy || !leaveConfirm) return;
+        if (!isCurrentSession(session) || !chat || chat.kind !== 'group' || leaveBusy || !leaveConfirm) return;
         setLeaveBusy(true);
         setRoomError('');
         try {

@@ -1,3 +1,4 @@
+import { sessionQueue, currentSessionSignal, assertCurrentSession } from './sessionScope.ts';
 import { ensureLoginConnection } from "./loginService.ts";
 import { websocketService, type WebSocketMessage } from "./websocket.ts";
 import { withApiProbeGate } from "./apiProbeGate.ts";
@@ -6,7 +7,7 @@ import { withApiProbeGate } from "./apiProbeGate.ts";
 type UserCheckResponse = { status?: unknown };
 
 // Phản hồi kiểm tra online không có requestId/username: chỉ gửi một yêu cầu mỗi lần.
-let pendingCheck: Promise<unknown> = Promise.resolve();
+const pendingCheck = sessionQueue();
 // Runtime API evidence: CHECK_USER_ONLINE succeeds while
 // CHAT_CHECK_USER_ONLINE produces ACTION_NOT_EXIT on this deployment.
 let onlineProtocol: 'documented' | 'alternate' | 'unsupported' = 'alternate';
@@ -14,12 +15,11 @@ let checkedSocket: WebSocket | null = null;
 const UNSUPPORTED_MESSAGE = 'Máy chủ hiện không hỗ trợ API kiểm tra Online/Offline (ACTION_NOT_EXIT).';
 
 function serializedCheck<T>(operation: () => Promise<T>): Promise<T> {
-    const result = pendingCheck.catch(() => undefined).then(() => withApiProbeGate(operation));
-    pendingCheck = result.catch(() => undefined);
-    return result;
+    return pendingCheck(session => withApiProbeGate(() => {assertCurrentSession(session);return operation();}));
 }
 
 function checkResponse(requestEvent: string, responseEvent: string, username: string): Promise<boolean> {
+    const session=currentSessionSignal();
     return new Promise<boolean>((resolve, reject) => {
         let settled = false;
         const cleanups: Array<() => void> = [];
@@ -53,6 +53,9 @@ function checkResponse(requestEvent: string, responseEvent: string, username: st
                 finish(new Error('Mất kết nối khi kiểm tra trạng thái người dùng.'));
             }
         }));
+        const abort=()=>finish(new Error('Phiên đăng nhập đã thay đổi.'));
+        session.addEventListener('abort',abort,{once:true});
+        cleanups.push(()=>session.removeEventListener('abort',abort));
         const timer = setTimeout(() => finish(new Error(`Máy chủ không phản hồi ${responseEvent}.`)), 4000);
         cleanups.push(() => clearTimeout(timer));
         try { websocketService.send(requestEvent, { user: username }); }
@@ -65,7 +68,9 @@ async function checkUserOnline(username: string): Promise<boolean> {
         throw new Error(UNSUPPORTED_MESSAGE);
     }
     return serializedCheck(async () => {
-        await ensureLoginConnection();
+        const session=currentSessionSignal();
+        await ensureLoginConnection(session);
+        assertCurrentSession(session);
         const socket = websocketService.getSocket();
         if (checkedSocket !== socket) {
             checkedSocket = socket;
@@ -80,15 +85,17 @@ async function checkUserOnline(username: string): Promise<boolean> {
                 return await checkResponse('CHECK_USER_ONLINE', 'CHECK_USER_ONLINE', username);
             } catch (error) {
                 if (!(error instanceof Error) || error.message !== 'ACTION_NOT_EXIT') throw error;
+                assertCurrentSession(session);
                 onlineProtocol = 'documented';
             }
         }
+        assertCurrentSession(session);
         try {
             return await checkResponse('CHAT_CHECK_USER_ONLINE', 'CHECK_USER_ONLINE', username);
         } catch (error) {
             if (error instanceof Error && error.message === 'ACTION_NOT_EXIT') {
                 onlineProtocol = 'unsupported';
-                throw new Error(UNSUPPORTED_MESSAGE);
+                throw new Error(UNSUPPORTED_MESSAGE, { cause: error });
             }
             throw error;
         }
@@ -98,7 +105,9 @@ async function checkUserOnline(username: string): Promise<boolean> {
 export const userService = {
     checkUserExist(username: string): Promise<boolean> {
         return serializedCheck(async () => {
-            await ensureLoginConnection();
+            const session=currentSessionSignal();
+            await ensureLoginConnection(session);
+            assertCurrentSession(session);
             return checkResponse('CHAT_CHECK_USER_EXIST', 'CHECK_USER_EXIST', username);
         });
     },

@@ -8,7 +8,7 @@ const chatService=readFileSync(new URL('../src/services/peopleChatService.ts',im
 const app=readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8');
 
 test('Lịch sử chat gọi API từ người dùng đã xác thực, không tự xác nhận kết quả',()=>{
-  assert.match(chatService,/await ensureLoginConnection\(\)/);
+  assert.match(chatService,/await ensureLoginConnection\(session\)/);
   assert.match(chatService,/requestChatHistory/);
   assert.match(chatService,/response\.status === "error"/);
 });

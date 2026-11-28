@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Private runtime configuration and chat uploads
+.env
+.env.*
+!.env.example
+server/uploads/
+*.tsbuildinfo

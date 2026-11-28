@@ -10,17 +10,17 @@ function normalize(value: string) {
 }
 
 function DirectoryRows({ entries, isGroup, onOpenGroup }: { entries: ContactEntry[]; isGroup: boolean; onOpenGroup?: (entry: ContactEntry) => void }) {
-  let previousLetter = "";
-
   if (entries.length === 0) {
     return <div className="directory-empty">Không tìm thấy {isGroup ? "nhóm" : "bạn bè"} phù hợp.</div>;
   }
 
   return <div className="directory-rows">
-    {entries.map((entry) => {
+    {entries.map((entry, index) => {
       const letter = normalize(entry.name.charAt(0)).charAt(0).toLocaleUpperCase("vi");
+      const previousLetter = index > 0
+        ? normalize(entries[index - 1].name.charAt(0)).charAt(0).toLocaleUpperCase("vi")
+        : "";
       const showLetter = letter !== previousLetter;
-      previousLetter = letter;
 
       return <div key={entry.id}>
         {showLetter && <h3 className="directory-letter">{letter}</h3>}
@@ -64,7 +64,7 @@ export function ContactDirectory({onRefresh, onCreateRoom, onJoinRoom, onOpenGro
     return entries
         .filter((entry) => normalize(entry.name).includes(normalizedQuery))
         .sort((a, b) => a.name.localeCompare(b.name, "vi", { sensitivity: "base" }) * (ascending ? 1 : -1));
-  }, [activeTab, ascending, query, entries]);
+  }, [ascending, query, entries]);
 
   const isFriends = activeTab === "friends";
   const title = isFriends ? "Danh sách bạn bè" : "Danh sách nhóm";

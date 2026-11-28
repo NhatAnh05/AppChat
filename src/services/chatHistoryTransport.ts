@@ -1,3 +1,4 @@
+import { sessionQueue, assertCurrentSession } from './sessionScope.ts';
 /**
  * Excel specifies GET_PEOPLE_CHAT_MES for people and GET_ROOM_CHAT_MES for rooms.
  * Keep the existing CHAT_PEOPLE_GET_MES compatibility alias only for ACTION_NOT_EXIT.
@@ -11,7 +12,7 @@ import { withApiProbeGate } from './apiProbeGate.ts';
 export const HISTORY_EVENT = CHAT_HISTORY_EVENT;
 const ROOM_EVENT = ROOM_HISTORY_EVENT;
 type HistoryKind = 'people' | 'room';
-let queue: Promise<void> = Promise.resolve();
+const queue = sessionQueue();
 const ALTERNATES: Record<HistoryKind, string> = {
   people: 'GET_PEOPLE_CHAT_MES',
   room: ROOM_HISTORY_EVENT,
@@ -61,9 +62,10 @@ export function historyResponseMatches(message: WebSocketMessage, kind: HistoryK
 export function requestChatHistory(name: string, page: number, kind: HistoryKind, timeoutMs = 10_000, signal?: AbortSignal): Promise<WebSocketMessage> {
   if (!name.trim() || !Number.isInteger(page) || page < 1) return Promise.reject(new Error('Yêu cầu lịch sử không hợp lệ.'));
   if (signal?.aborted) return Promise.reject(new Error('Đã hủy tải lịch sử.'));
-  const run = queue.catch(() => undefined).then(() => withApiProbeGate(async () => {
+  return queue(session => withApiProbeGate(async () => {
+    assertCurrentSession(session);
     if (signal?.aborted) throw new Error('Đã hủy tải lịch sử.');
-    await ensureLoginConnection();
+    await ensureLoginConnection(session);
     if (signal?.aborted) throw new Error('Đã hủy tải lịch sử.');
     currentCapabilities();
     if (unsupported.has(kind)) throw new Error('Máy chủ không hỗ trợ API lấy lịch sử cho loại cuộc trò chuyện này. Hãy kiểm tra phiên bản API.');
@@ -71,6 +73,7 @@ export function requestChatHistory(name: string, page: number, kind: HistoryKind
     for (const event of candidates) {
       try {
         const frame = await new Promise<WebSocketMessage>((resolve, reject) => {
+          assertCurrentSession(session);
           const socket = websocketService.getSocket();
           let settled = false;
           const cleanups: Array<() => void> = [];
@@ -96,13 +99,16 @@ export function requestChatHistory(name: string, page: number, kind: HistoryKind
           }));
           const onAbort = () => finish(new Error('Đã hủy tải lịch sử.'));
           signal?.addEventListener('abort', onAbort, { once:true });
+          session.addEventListener('abort', onAbort, {once:true});
+          cleanups.push(() => session.removeEventListener('abort', onAbort));
           cleanups.push(() => signal?.removeEventListener('abort', onAbort));
           const timer = setTimeout(() => finish(new Error('Máy chủ chưa phản hồi lịch sử tin nhắn.')), timeoutMs);
           cleanups.push(() => clearTimeout(timer));
-          if (signal?.aborted) { onAbort(); return; }
+          if (signal?.aborted || session.aborted) { onAbort(); return; }
           try { websocketService.send(event, { name, page }); }
           catch (error) { finish(error instanceof Error ? error : new Error('Không gửi được yêu cầu lịch sử.')); }
         });
+        assertCurrentSession(session);
         preferredEvent.set(kind, event);
         return frame;
       } catch (error) {
@@ -114,6 +120,5 @@ export function requestChatHistory(name: string, page: number, kind: HistoryKind
     unsupported.add(kind);
     throw new Error('Máy chủ trả ACTION_NOT_EXIT: cả API lịch sử mới và phiên bản cũ đều không được hỗ trợ. Đã dừng tự động tải lại để tránh spam WebSocket.');
   }));
-  queue = run.then(() => undefined, () => undefined);
-  return run;
+
 }

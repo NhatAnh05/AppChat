@@ -9,3 +9,8 @@ coverage
 .env.production
 *.tsbuildinfo
 npm-debug.log*
+
+# Private runtime data must not enter the build context
+.env.*
+!.env.example
+server/uploads/

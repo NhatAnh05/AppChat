@@ -1,5 +1,6 @@
+import { currentSessionSignal, assertCurrentSession, sessionQueue } from './sessionScope.ts';
 /** Group-related authenticated WebSocket operations. No success is invented on timeout. */
-import { ensureLoginConnection } from './loginService.ts';
+import { ensureLoginConnection, getAuthenticatedUsername } from './loginService.ts';
 import { websocketService, type WebSocketMessage } from './websocket.ts';
 import { normalizeRoomName, parseJoinRoomResponse, parseLeaveRoomResponse,
   parseRoomHistoryResponse, parseRoomSendResponse, makeRoomHistoryRequest,
@@ -11,22 +12,24 @@ import { enqueueChatSend } from './chatSendQueue.ts';
 type Options={timeoutMs?:number;signal?:AbortSignal};
 const TIMEOUT=10000;
 // Responses do not carry client request IDs. Serialize requests sharing an event.
-const queues=new Map<string,Promise<unknown>>();
+const queues=new Map<string,ReturnType<typeof sessionQueue>>();
 function serialize<T>(event:string,action:()=>Promise<T>):Promise<T>{
-  const previous=queues.get(event)??Promise.resolve();
-  const run=previous.catch(()=>undefined).then(action);
-  queues.set(event,run.then(()=>undefined,()=>undefined));return run;
+  let queue=queues.get(event);
+  if(!queue){queue=sessionQueue();queues.set(event,queue);}
+  return queue(()=>action());
 }
 async function request<T>(event:string,payload:object,interpret:(frame:WebSocketMessage)=>T|null,options:Options={}):Promise<T>{
   if(options.signal?.aborted)throw new Error('Đã hủy thao tác.');
-  await ensureLoginConnection();
+  const session=currentSessionSignal();
+  await ensureLoginConnection(session);
+  assertCurrentSession(session);
   if(options.signal?.aborted)throw new Error('Đã hủy thao tác.');
   const socket=websocketService.getSocket();
   if(!socket||!websocketService.isAuthenticated())throw new Error('Cần đăng nhập trước khi thao tác nhóm.');
   return new Promise<T>((resolve,reject)=>{
     let ended=false;
     let offMsg=()=>{};let offStatus=()=>{};
-    const cleanup=()=>{clearTimeout(timer);offMsg();offStatus();options.signal?.removeEventListener('abort',abort)};
+    const cleanup=()=>{clearTimeout(timer);offMsg();offStatus();options.signal?.removeEventListener('abort',abort);session.removeEventListener('abort',abort)};
     const fail=(e:Error)=>{if(ended)return;ended=true;cleanup();reject(e)};
     const succeed=(value:T)=>{if(ended)return;ended=true;cleanup();resolve(value)};
     const abort=()=>fail(new Error('Đã hủy thao tác.'));
@@ -38,8 +41,9 @@ async function request<T>(event:string,payload:object,interpret:(frame:WebSocket
       try{const result=interpret(frame);if(result!==null)succeed(result)}catch(e){fail(e instanceof Error?e:new Error('Phản hồi không hợp lệ.'))}
     });
     offStatus=websocketService.onStatus(s=>{if(s==='DISCONNECTED'||s==='ERROR')fail(new Error('Mất kết nối WebSocket.'))});
+    session.addEventListener('abort',abort,{once:true});
     options.signal?.addEventListener('abort',abort,{once:true});
-    if(options.signal?.aborted){abort();return}
+    if(options.signal?.aborted||session.aborted){abort();return}
     try{websocketService.send(event,payload)}catch(e){fail(e instanceof Error?e:new Error('Không gửi được yêu cầu.'))}
   });
 }
@@ -68,7 +72,9 @@ export async function leaveRoom(rawName:string,options:Options={}):Promise<void>
 export async function getRoomHistory(rawName:string,page=1,options:Options={}):Promise<{room:RoomDetails;messages:ChatMessage[]}>{
   const name=normalizeRoomName(rawName);
   makeRoomHistoryRequest(name,page); // Kiểm tra số trang trước khi gửi.
+  const session=currentSessionSignal();
   const frame=await requestChatHistory(name,page,'room',options.timeoutMs??TIMEOUT,options.signal);
+  assertCurrentSession(session);
   const result=parseRoomHistoryResponse(frame,name);
   if(!result) throw new Error('Máy chủ trả dữ liệu lịch sử nhóm không đúng định dạng.');
   if(result.status==='error') throw new Error(result.message);
@@ -77,10 +83,13 @@ export async function getRoomHistory(rawName:string,page=1,options:Options={}):P
 export async function sendRoomMessage(rawName:string,content:string,options:Options={}):Promise<ChatMessage>{
   const name=normalizeRoomName(rawName);
   const payload=makeRoomMessageRequest(name,content).data.data;
-  return enqueueChatSend(()=>serialize('SEND_CHAT',()=>request('SEND_CHAT',payload,frame=>{
+  const session=currentSessionSignal();
+  return enqueueChatSend(()=>{assertCurrentSession(session);return serialize('SEND_CHAT',()=>request('SEND_CHAT',payload,frame=>{
     const result=parseRoomSendResponse(frame,name,content);
     if(!result)return null;
     if(result.status==='error')throw new Error(result.message);
+    const user=getAuthenticatedUsername();
+    if(!user || result.message.senderId.toLowerCase()!==user.toLowerCase())return null;
     return result.message;
-  },options)));
+  },options));});
 }

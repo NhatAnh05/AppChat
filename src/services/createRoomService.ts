@@ -1,3 +1,4 @@
+import { currentSessionSignal, assertCurrentSession } from './sessionScope.ts';
 import { ensureLoginConnection } from './loginService.ts';
 import { normalizeRoomName, parseCreateRoomResponse, type CreatedRoom } from './createRoomProtocol.ts';
 import { websocketService } from './websocket.ts';
@@ -7,11 +8,13 @@ const DEFAULT_TIMEOUT_MS = 10000;
 
 // The teacher's CREATE_ROOM response has no request ID. Serialize requests to
 // prevent a response for one name being mistaken for another pending create.
-let pending: { name: string; promise: Promise<CreatedRoom> } | null = null;
+let pending: { name: string; promise: Promise<CreatedRoom>; session: AbortSignal } | null = null;
 
 async function sendCreateRoom(name: string, options: CreateRoomOptions): Promise<CreatedRoom> {
   if (options.signal?.aborted) throw new Error('Đã hủy tạo nhóm.');
-  await ensureLoginConnection();
+  const session=currentSessionSignal();
+  await ensureLoginConnection(session);
+  assertCurrentSession(session);
   if (options.signal?.aborted) throw new Error('Đã hủy tạo nhóm.');
   const socket = websocketService.getSocket();
   if (!socket || !websocketService.isAuthenticated()) throw new Error('Vui lòng đăng nhập trước khi tạo nhóm.');
@@ -23,6 +26,7 @@ async function sendCreateRoom(name: string, options: CreateRoomOptions): Promise
       offMessage();
       offStatus();
       options.signal?.removeEventListener('abort', onAbort);
+      session.removeEventListener('abort',onAbort);
     };
     const finish = (error?: Error, room?: CreatedRoom) => {
       if (finished) return;
@@ -49,6 +53,7 @@ async function sendCreateRoom(name: string, options: CreateRoomOptions): Promise
     });
     const timer = setTimeout(() => finish(new Error('Máy chủ không phản hồi CREATE_ROOM.')),
       options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    session.addEventListener('abort',onAbort,{once:true});
     options.signal?.addEventListener('abort', onAbort, {once: true});
     if (options.signal?.aborted) { onAbort(); return; }
     try { websocketService.send('CREATE_ROOM', { name }); }
@@ -60,13 +65,14 @@ export function createRoom(rawName: string, options: CreateRoomOptions = {}): Pr
   let name: string;
   try { name = normalizeRoomName(rawName); }
   catch (error) { return Promise.reject(error); }
-  if (pending) {
+  const session=currentSessionSignal();
+  if (pending?.session===session) {
     return pending.name === name
       ? pending.promise
       : Promise.reject(new Error('Đang tạo một nhóm khác, vui lòng hoàn tất yêu cầu hiện tại.'));
   }
   const task = sendCreateRoom(name, options);
-  pending = {name, promise:task};
+  pending = {name, promise:task,session};
   void task.then(() => { if (pending?.promise === task) pending = null; },
     () => { if (pending?.promise === task) pending = null; });
   return task;

@@ -18,9 +18,8 @@ export function reLoginOnce(
     try { socket = new WebSocket(url); }
     catch { reject(new Error('Không thể tạo kết nối WebSocket.')); return; }
     let settled = false;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const cleanup = () => {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      clearTimeout(timeoutId);
       options.signal?.removeEventListener('abort', onAbort);
       socket.onopen = null;
       socket.onmessage = null;
@@ -35,9 +34,9 @@ export function reLoginOnce(
       reject(error);
     };
     function onAbort() { fail(new Error('Đã hủy khôi phục phiên.')); }
+    const timeoutId = setTimeout(() => fail(new Error('Máy chủ không phản hồi RE_LOGIN.')), options.timeoutMs ?? 12000);
     options.signal?.addEventListener('abort', onAbort, { once: true });
     if (options.signal?.aborted) { onAbort(); return; }
-    timeoutId = setTimeout(() => fail(new Error('Máy chủ không phản hồi RE_LOGIN.')), options.timeoutMs ?? 12000);
 
     socket.onopen = () => {
       try { socket.send(JSON.stringify(makeReLoginRequest(session.username, session.reLoginCode))); }

@@ -1,6 +1,7 @@
+import { currentSessionSignal, assertCurrentSession } from './sessionScope.ts';
 import type { ChatMessage } from "../types/chat.ts";
 import { websocketService, type WebSocketMessage } from "./websocket.ts";
-import { ensureLoginConnection } from "./loginService.ts";
+import { ensureLoginConnection, getAuthenticatedUsername } from "./loginService.ts";
 import { encodeChatContent, decodeChatContent } from "./chatContentCodec.ts";
 import { requestChatHistory } from "./chatHistoryTransport.ts";
 import { enqueueChatSend } from "./chatSendQueue.ts";
@@ -23,14 +24,13 @@ type ApiSentPeopleMessage = {
   type?: number | string;
 };
 
-let sendRequestQueue: Promise<void> = Promise.resolve();
+const uncertainSockets = new WeakSet<WebSocket>();
+const acknowledgedIds = new WeakMap<WebSocket, Set<string>>();
 const RESPONSE_TIMEOUT_MS = 10_000;
 
 class SendConfirmationMissingError extends Error {}
+export class UnconfirmedSendError extends Error {}
 
-async function ensureAuthenticatedConnection(): Promise<void> {
-  await ensureLoginConnection();
-}
 
 function mapMessage(message: ApiPeopleMessage, chatId: string): ChatMessage {
   return {
@@ -74,12 +74,16 @@ function requestHistory(username: string, page: number): Promise<WebSocketMessag
   return requestChatHistory(username,page,'people',RESPONSE_TIMEOUT_MS);
 }
 
-function requestSendMessage(sender: string, recipient: string, content: string): Promise<WebSocketMessage> {
-  const request = sendRequestQueue.catch(() => undefined).then(() => new Promise<WebSocketMessage>((resolve, reject) => {
+function requestSendMessage(sender: string, recipient: string, content: string, session: AbortSignal, knownIds: Set<string>): Promise<WebSocketMessage> {
+  assertCurrentSession(session);
+  const socket = websocketService.getSocket();
+  if (socket && uncertainSockets.has(socket)) return Promise.reject(new Error("Lần gửi trước chưa được xác nhận. Hãy kiểm tra lịch sử và kết nối lại trước khi gửi tiếp."));
+  return new Promise<WebSocketMessage>((resolve, reject) => {
     let unsubscribeMessage = () => {};
     let unsubscribeStatus = () => {};
     let settled = false;
-    const timeout = window.setTimeout(() => {
+    const timeout = setTimeout(() => {
+      if (socket) uncertainSockets.add(socket);
       cleanup();
       reject(new SendConfirmationMissingError("Chưa nhận được xác nhận từ máy chủ."));
     }, RESPONSE_TIMEOUT_MS);
@@ -89,14 +93,18 @@ function requestSendMessage(sender: string, recipient: string, content: string):
       settled = true;
       unsubscribeMessage();
       unsubscribeStatus();
-      window.clearTimeout(timeout);
+      session.removeEventListener("abort", onAbort);
+      clearTimeout(timeout);
     };
 
+    const onAbort = () => { cleanup(); reject(new Error("Phiên đăng nhập đã thay đổi.")); };
+    session.addEventListener("abort", onAbort, {once:true});
     unsubscribeMessage = websocketService.on("SEND_CHAT", (message) => {
+      if (session.aborted || websocketService.getSocket() !== socket) { onAbort(); return; }
       const data = message.data as Partial<ApiSentPeopleMessage> | null;
       // SEND_CHAT dùng chung cho chat nhóm và chat cá nhân. Không xác nhận từ
       // một broadcast nhóm, tin của người khác hoặc một ACK success chung chung.
-      if (data?.type === 1 || data?.type === 'room') return;
+      if (data?.type === 1 || data?.type === '1' || data?.type === 'room') return;
       if (message.status === "error") {
         cleanup();
         reject(new Error(message.mes ?? "Gửi tin nhắn thất bại."));
@@ -106,13 +114,20 @@ function requestSendMessage(sender: string, recipient: string, content: string):
       if (!data || typeof data.to !== 'string' || typeof data.mes !== 'string') return;
       if (data.to.trim().toLowerCase() !== recipient.trim().toLowerCase()) return;
       if (data.mes !== content) return;
-      if (typeof data.name === 'string' && data.name.trim().toLowerCase() !== sender.trim().toLowerCase()) return;
+      if (typeof data.name !== 'string' || data.name.trim().toLowerCase() !== sender.trim().toLowerCase()) return;
+      if (data.id !== undefined && socket) {
+        const id = String(data.id);
+        const seen = acknowledgedIds.get(socket) ?? new Set<string>();
+        if (knownIds.has(id) || seen.has(id)) return;
+        seen.add(id); acknowledgedIds.set(socket, seen);
+      }
       cleanup();
       resolve(message);
     });
 
     unsubscribeStatus = websocketService.onStatus((status) => {
       if (status === "ERROR" || status === "DISCONNECTED") {
+        if (socket) uncertainSockets.add(socket);
         cleanup();
         reject(new SendConfirmationMissingError("Mất kết nối khi gửi tin nhắn."));
       }
@@ -124,10 +139,7 @@ function requestSendMessage(sender: string, recipient: string, content: string):
       cleanup();
       reject(new Error("Mất kết nối. Tin nhắn chưa được gửi."));
     }
-  }));
-
-  sendRequestQueue = request.then(() => undefined, () => undefined);
-  return request;
+  });
 }
 
 export const peopleChatService = {
@@ -135,8 +147,11 @@ export const peopleChatService = {
     if (!username.trim()) throw new Error('Chưa chọn người trò chuyện.');
     const pageNumber = Number.isInteger(page) && page > 0 ? page : 1;
 
-    await ensureAuthenticatedConnection();
+    const session = currentSessionSignal();
+    await ensureLoginConnection(session);
+    assertCurrentSession(session);
     const response = await requestHistory(username, pageNumber);
+    assertCurrentSession(session);
 
     if (response.status === "error") {
       const message = response.mes ?? 'Không tải được lịch sử tin nhắn.';
@@ -154,7 +169,7 @@ export const peopleChatService = {
       sender: string,
       recipient: string,
       content: string,
-      knownMessageIds: string[] = [],
+      knownMessageIds: string[] = [], // reject replayed known server IDs
   ): Promise<ChatMessage | null> {
     const trimmedContent = content.trim();
     const transportContent = encodeChatContent(trimmedContent);
@@ -162,42 +177,31 @@ export const peopleChatService = {
     if (!trimmedContent) throw new Error("Nhập nội dung tin nhắn.");
     if (!sender.trim() || !recipient.trim()) throw new Error("Thiếu người gửi hoặc người nhận.");
 
-    try {
-      await ensureAuthenticatedConnection();
-    } catch {
-      throw new Error("Không kết nối được máy chủ.");
-    }
-
+    const session = currentSessionSignal();
     let response: WebSocketMessage;
     try {
-      response = await enqueueChatSend(() => requestSendMessage(sender, recipient, transportContent));
+      response = await enqueueChatSend(async queuedSession => {
+        assertCurrentSession(session);
+        await ensureLoginConnection(queuedSession);
+        assertCurrentSession(session);
+        // A late ACK without a request ID could otherwise confirm the next send.
+        // Recycle only the uncertain transport, keeping the same account lifetime.
+        const socket = websocketService.getSocket();
+        if (socket && uncertainSockets.has(socket)) {
+          socket.close();
+          await ensureLoginConnection(queuedSession);
+          assertCurrentSession(session);
+        }
+        const user = getAuthenticatedUsername();
+        if (!user || user.trim().toLowerCase() !== sender.trim().toLowerCase()) throw new Error('Người gửi không thuộc phiên hiện tại.');
+        return requestSendMessage(sender, recipient, transportContent, session, new Set(knownMessageIds));
+      });
+      assertCurrentSession(session);
     } catch (error) {
       if (!(error instanceof SendConfirmationMissingError)) throw error;
-
-      try {
-        await ensureAuthenticatedConnection();
-        const knownIds = new Set(knownMessageIds);
-        // Some deployments do not emit a SEND_CHAT acknowledgment. Verify the
-        // actual server history, allowing a short delay for asynchronous writes.
-        for (let attempt = 0; attempt < 3; attempt++) {
-          if (attempt > 0) await new Promise(resolve => window.setTimeout(resolve, 1200 * attempt));
-          const historyResponse = await requestHistory(recipient, 1);
-          if (historyResponse.status === "error") continue;
-          const recentHistory = validateMessages(historyResponse.data)
-              .slice(0, 50)
-              .map(message => mapMessage(message, recipient));
-          const confirmedMessage = recentHistory.find(message =>
-              !knownIds.has(message.id) &&
-              message.senderId.toLowerCase() === sender.toLowerCase() &&
-              message.recipientId?.toLowerCase() === recipient.toLowerCase() &&
-              message.content === trimmedContent
-          );
-          if (confirmedMessage) return confirmedMessage;
-        }
-        throw new Error("Máy chủ chưa xác nhận hoặc chưa lưu tin nhắn chứa emoji. Chữ thường gửi được nhưng nội dung mã hóa chưa được server phản hồi. Hãy mở Nhật ký API để kiểm tra SEND_CHAT và CHAT_PEOPLE_GET_MES; không gửi lại liên tục để tránh trùng tin.", { cause: error });
-      } catch (historyError) {
-        throw historyError instanceof Error ? historyError : new Error("Không xác minh được trạng thái gửi tin.");
-      }
+      // No request ID in the teacher API: even a new matching history row is not
+      // proof of this particular send (another tab or delayed send may match).
+      throw new UnconfirmedSendError('Máy chủ chưa xác nhận lần gửi này. Tin có thể đã được lưu; kiểm tra lịch sử trước khi gửi lại.', {cause:error});
     }
 
     const data = response.data as Partial<ApiSentPeopleMessage> | null;

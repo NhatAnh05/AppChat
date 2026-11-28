@@ -23,6 +23,8 @@ export function AuthInitializer({children}: {children: ReactNode}) {
         } else {
             dispatch(clearCredentials());
         }
+        // The gate becomes ready only after restoring/clearing external credentials.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- Complete the one-time external session bootstrap before mounting routes.
         setInitialized(true);
     }, [dispatch]);
     return initialized ? <>{children}</> : <div>Đang khôi phục phiên đăng nhập...</div>;
