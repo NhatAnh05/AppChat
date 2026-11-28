@@ -5,4 +5,5 @@ export type ContactEntry = {
   color: string;
   detail?: string;
   online?: boolean;
+  onlineCheckedAt?: number;
 };

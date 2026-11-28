@@ -1,6 +1,6 @@
 import { currentSessionSignal, assertCurrentSession } from './sessionScope.ts';
 import { websocketService } from './websocket.ts';
-import { ensureLoginConnection } from './loginService.ts';
+import { ensureCorrelatedConnection, quarantineResponse, enqueueAuthenticatedRequest } from './requestCorrelation.ts';
 
 export type UserListItem = {name: string; type: 0 | 1; actionTime: string};
 
@@ -20,8 +20,9 @@ let pendingList: Promise<UserListItem[]> | null = null;
 let pendingSession: AbortSignal | undefined;
 async function requestList(): Promise<UserListItem[]> {
     const session=currentSessionSignal();
-    await ensureLoginConnection(session);
+    await ensureCorrelatedConnection(session,'contacts');
     assertCurrentSession(session);
+    const socket=websocketService.getSocket();
     return new Promise<UserListItem[]>((resolve, reject) => {
         let finished = false;
         const cleanup = () => { clearTimeout(timeout); offMessage(); offStatus(); session.removeEventListener('abort',abort); };
@@ -37,11 +38,11 @@ async function requestList(): Promise<UserListItem[]> {
             finish(undefined, list);
         });
         const offStatus = websocketService.onStatus(status => {
-            if (status === 'DISCONNECTED' || status === 'ERROR') finish(new Error('Mất kết nối khi tải danh bạ.'));
+            if (status === 'DISCONNECTED' || status === 'ERROR') {quarantineResponse(socket,'contacts');finish(new Error('Mất kết nối khi tải danh bạ.'));}
         });
         const abort=()=>finish(new Error('Phiên đăng nhập đã thay đổi.'));
         session.addEventListener('abort',abort,{once:true});
-        const timeout = setTimeout(() => finish(new Error('Hết thời gian chờ GET_USER_LIST.')), 10000);
+        const timeout = setTimeout(() => {quarantineResponse(socket,'contacts');finish(new Error('Hết thời gian chờ GET_USER_LIST.'));}, 10000);
         try { websocketService.send('GET_USER_LIST', {}); }
         catch(error) { finish(error instanceof Error ? error : new Error('Không thể gửi GET_USER_LIST.')); }
     });
@@ -52,7 +53,7 @@ export const contactService = {
         const session=currentSessionSignal();
         if (pendingList && pendingSession===session) return pendingList;
         pendingSession=session;
-        const task = requestList();
+        const task = enqueueAuthenticatedRequest(() => requestList());
         pendingList = task;
         void task.finally(() => { if (pendingList === task) pendingList = null; }).catch(() => undefined);
         return task;

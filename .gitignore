@@ -29,3 +29,6 @@ dist-ssr
 !.env.example
 server/uploads/
 *.tsbuildinfo
+
+# Isolated local media sandbox (never commit or deploy test files)
+server/uploads-local/

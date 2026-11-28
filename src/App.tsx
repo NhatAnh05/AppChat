@@ -20,21 +20,24 @@ import { mapRoomMessage, roomChatId } from "./services/roomChatProtocol.ts";
 import { makeGroupContact, readableGroupError, sameGroupName } from "./services/groupManagement.ts";
 import type { UserListItem } from "./services/contactService";
 import {setContactsError, setContactsLoading, setFriends, setGroups, addGroup, removeGroup} from "./features/contacts/contactsSlice";
-import { addMessage, fetchPeopleChatHistory, importLocalMessages, invalidateHistory, clearConversationMessages } from "./features/messages/messagesSlice";
+import { addMessage, fetchPeopleChatHistory, fetchRoomChatHistory, importLocalMessages, clearConversationMessages } from "./features/messages/messagesSlice";
 import { websocketService, type ApiLogEntry, type WebSocketState } from "./services/websocket";
 import type { AppDispatch, RootState } from "./store/store";
 import type { Chat } from "./types/chat";
 import type { ContactEntry } from "./types/contact";
 import "./App.css";
+import { parseServerChatMessage } from './services/serverMessage.ts';
+import { GroupRealtimeBuffer } from './services/groupRealtimeBuffer.ts';
+import { activityKey, reconnectHistoryPlan } from './services/reconnectHistoryPlan.ts';
+import { isHistoryUnsupported } from './services/chatHistoryTransport.ts';
 import { decodeChatContent } from "./services/chatContentCodec";
 import { mediaMessagePreview } from "./services/mediaMessage";
-import { messagePreview as legacyMediaPreview } from "./services/mediaMessages";
 import { parseInteraction, visibleMessageContent } from "./services/messageInteractions";
 import {userService} from "./services/userService.ts";
 import { notifyIncomingMessage } from "./services/desktopNotifications.ts";
 import { PRESENCE_REFRESH_MS } from "./services/chatRefreshPolicy.ts";
 import { logoutCurrentSession } from "./services/logoutService.ts";
-import { setContactOnline, clearOnlineStatuses } from "./features/contacts/contactsSlice";
+import { setContactOnline, clearOnlineStatuses, expireOnlineStatuses } from "./features/contacts/contactsSlice";
 import { getConnectionState, subscribeConnectionState } from "./services/connectionHealth.ts";
 import { getChatUnread, getTotalUnreadForChats, markChatRead, readUnreadLedger, recordIncomingMessage,
     reconcileUnreadMessages, saveUnreadLedger } from "./services/unreadNotifications.ts";
@@ -90,6 +93,12 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     });
     const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
     const [contactsInitialized, setContactsInitialized] = useState(false);
+    const [roomBuffer] = useState(()=>new GroupRealtimeBuffer());
+    const groupRevision = useRef(0);
+    const contactsRefresh = useRef<Promise<UserListItem[]|null>|null>(null);
+    const lastActivitySnapshot = useRef<Map<string,string>|null>(null);
+    const selectedForSync = useRef<Chat|null>(null);
+    useEffect(()=>{selectedForSync.current=selectedChat;},[selectedChat]);
     const [presenceError, setPresenceError] = useState<string | null>(null);
     const [presenceChecking, setPresenceChecking] = useState(false);
     const [unreadLedger, setUnreadLedger] = useState(() => readUnreadLedger(currentUserId));
@@ -156,69 +165,47 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         };
     }, [selectedChat]);
 
-    // Receive forwarded 1-1 messages; outgoing acknowledgements are handled by peopleChatService.
+    const publishRoomMessage = useCallback((data: ReturnType<typeof parseServerChatMessage>, group:ContactEntry, receivedAt=Date.now()) => {
+        if (!data || !isCurrentSession(session)) return;
+        const incoming = mapRoomMessage(data, group.id);
+        if (!incoming) return;
+        const message = {...incoming, createdAt:data.createAt??new Date(receivedAt).toISOString(), orderAt:new Date(receivedAt).toISOString()};
+        if (store.getState().messages.messages.some(m=>m.chatId===message.chatId&&m.id===message.id))return;
+        dispatch(addMessage(message));
+        setUnreadLedger(previous => recordIncomingMessage(previous, message, currentUserId,
+            selectedForSync.current?.id ?? null, document.visibilityState === 'visible' && document.hasFocus()));
+        notifyIncomingMessage(currentUserId, message.senderName ?? message.senderId, `${message.chatId}:${message.id}`);
+    },[currentUserId,dispatch,session,store]);
+
+    // Receive realtime events on the authenticated socket; only known room membership can publish.
     useEffect(() => websocketService.on("SEND_CHAT", (message) => {
         if (!isCurrentSession(session) || !websocketService.isAuthenticated() || message.status === "error") return;
-
-        const data = message.data as {
-            id?: string | number;
-            name?: string;
-            to?: string;
-            mes?: string;
-            createAt?: string;
-            type?: number | string | null;
-        } | null;
-        if (!data || typeof data.name !== "string" || typeof data.to !== "string" || typeof data.mes !== "string") return;
-        // Group broadcasts use to=room and type=1, not the recipient username.
-        if (Number(data.type) === 1 || data.type === 'room') {
-            if (data.name.trim().toLowerCase() === currentUserId.trim().toLowerCase()) return;
-            const group = groups.find(entry => entry.id.trim().toLowerCase() === data.to.trim().toLowerCase());
-            if (!group) return; // Do not invent membership from an unrelated broadcast.
-            const incoming = mapRoomMessage(data, group.id);
-            if (!incoming) return;
-            setUnreadLedger(previous => recordIncomingMessage(previous, incoming, currentUserId,
-                selectedChat?.id ?? null, document.visibilityState === 'visible' && document.hasFocus()));
-            dispatch(addMessage({...incoming, orderAt: new Date().toISOString()}));
-            notifyIncomingMessage(currentUserId, incoming.senderName ?? incoming.senderId,
-                `${incoming.chatId}:${incoming.id}`);
+        const data=parseServerChatMessage(message.data);
+        if(!data)return;
+        if(data.name.trim().toLowerCase()===currentUserId.trim().toLowerCase())return;
+        if(data.type===1) {
+            const group=store.getState().contacts.groups.find(entry=>sameGroupName(entry.id,data.to));
+            if(group)publishRoomMessage(data,group);
+            else roomBuffer.push(data); // bounded until the next authoritative membership snapshot
             return;
         }
-        // The sender already adds the matching SEND_CHAT acknowledgement when the request resolves.
-        if (data.name.trim().toLowerCase() === currentUserId.trim().toLowerCase()) return;
-        if (data.to.trim().toLowerCase() !== currentUserId.trim().toLowerCase()) return;
-
-        if (!data.name.trim()) return;
-        const chatId = friends.find(
-            (friend) => friend.id.trim().toLowerCase() === data.name.trim().toLowerCase(),
-        )?.id ?? data.name;
-
-        // A sender absent from GET_USER_LIST must still be shown in the chat list.
-        // Otherwise unread messages can accumulate with no conversation to open.
-        const currentFriends = store.getState().contacts.friends;
-        if (!currentFriends.some(friend => friend.id.trim().toLowerCase() === chatId.trim().toLowerCase())) {
-            dispatch(setFriends([...currentFriends, mapUserToContact(
-                { name: data.name, type: 0, actionTime: '' }, 'friend',
-            )]));
+        if(data.to.trim().toLowerCase()!==currentUserId.trim().toLowerCase())return;
+        const currentFriends=store.getState().contacts.friends;
+        const chatId=currentFriends.find(friend=>sameGroupName(friend.id,data.name))?.id??data.name;
+        if(!currentFriends.some(friend=>sameGroupName(friend.id,chatId))) {
+            dispatch(setFriends([...currentFriends,mapUserToContact({name:data.name,type:0,actionTime:''},'friend')]));
         }
-
-        const incomingMessage = {
-            id: String(data.id ?? crypto.randomUUID()),
-            chatId,
-            senderId: data.name,
-            senderName: data.name,
-            recipientId: data.to,
-            recipientName: data.to,
-            content: decodeChatContent(data.mes),
-            createdAt: data.createAt ?? new Date().toISOString(),
-            orderAt: new Date().toISOString(),
-            type: typeof data.type === "number" ? data.type : 0,
+        const incomingMessage={
+            id:String(data.id??`live:${crypto.randomUUID()}`),chatId,senderId:data.name,senderName:data.name,
+            recipientId:data.to,recipientName:data.to,content:decodeChatContent(data.mes),
+            createdAt:data.createAt??new Date().toISOString(),orderAt:new Date().toISOString(),type:0,
         };
-        setUnreadLedger(previous => recordIncomingMessage(previous, incomingMessage, currentUserId,
-            selectedChat?.id ?? null, document.visibilityState === 'visible' && document.hasFocus()));
+        if(store.getState().messages.messages.some(m=>m.chatId===chatId&&m.id===incomingMessage.id))return;
         dispatch(addMessage(incomingMessage));
-        notifyIncomingMessage(currentUserId, incomingMessage.senderName ?? incomingMessage.senderId,
-            `${incomingMessage.chatId}:${incomingMessage.id}`);
-    }), [currentUserId, dispatch, friends, groups, selectedChat?.id, store, session]);
+        setUnreadLedger(previous=>recordIncomingMessage(previous,incomingMessage,currentUserId,
+            selectedForSync.current?.id??null,document.visibilityState==='visible'&&document.hasFocus()));
+        notifyIncomingMessage(currentUserId,data.name,`${chatId}:${incomingMessage.id}`);
+    }),[currentUserId,dispatch,publishRoomMessage,roomBuffer,store,session]);
 
     // Explicit check allows a user to verify the teacher server's real response.
     // No simulated/guessed Online state when the server does not answer.
@@ -229,15 +216,18 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             assertCurrentSession(session);
             const online = await userService.checkUserOnline(username);
             assertCurrentSession(session);
-            dispatch(setContactOnline({ id: username, online }));
+            dispatch(setContactOnline({ id: username, online, checkedAt: Date.now() }));
             return online;
         } catch (error) {
             const reason = error instanceof Error ? error.message : 'Không xác định được phản hồi từ máy chủ.';
-            setPresenceError(reason);
+            if (isCurrentSession(session)) {
+                dispatch(setContactOnline({id:username,online:undefined}));
+                if (selectedForSync.current?.id === username) setPresenceError(reason);
+            }
             console.warn('[LyraChat] Kiểm tra trạng thái thất bại:', username, reason);
             return undefined;
         } finally {
-            setPresenceChecking(false);
+            if (isCurrentSession(session)) setPresenceChecking(false);
         }
     };
 
@@ -256,19 +246,29 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             try {
                 const online = await userService.checkUserOnline(activeId);
                 if (!cancelled && isCurrentSession(session) && websocketService.isAuthenticated()) {
-                    dispatch(setContactOnline({id: activeId, online}));
+                    dispatch(setContactOnline({id: activeId, online, checkedAt: Date.now()}));
                     setPresenceError(null);
                 }
             } catch (error) {
-                if (!cancelled && !userService.isOnlineCheckUnsupported()) {
+                if (!cancelled && isCurrentSession(session)) {
+                    dispatch(setContactOnline({id:activeId,online:undefined}));
                     setPresenceError(error instanceof Error ? error.message : 'Không kiểm tra được trạng thái.');
                 }
             } finally { checking = false; }
         };
         void checkActive();
         const interval = window.setInterval(() => void checkActive(), PRESENCE_REFRESH_MS);
-        return () => { cancelled = true; window.clearInterval(interval); };
+        const focus = () => { void checkActive(); };
+        window.addEventListener('focus',focus);
+        return () => { cancelled = true; window.clearInterval(interval); window.removeEventListener('focus',focus); };
     }, [currentUserId, connectionStatus, contactsInitialized, selectedChat?.id, selectedChat?.kind, dispatch, session]);
+
+    useEffect(() => {
+        const expire = () => { if (isCurrentSession(session)) dispatch(expireOnlineStatuses(Date.now())); };
+        const timer = window.setInterval(expire, 15_000);
+        window.addEventListener('focus',expire);
+        return () => { window.clearInterval(timer); window.removeEventListener('focus',expire); };
+    }, [dispatch, session]);
 
     // Không tải lịch sử của toàn bộ danh bạ khi đăng nhập.
     // CHAT_PEOPLE_GET_MES không có request ID nên các yêu cầu phải tuần tự;
@@ -290,56 +290,90 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         return contactChats;
     }, [friends, groups, selectedChat]);
 
-    const refreshUserList = useCallback(async () => {
-        if (!isCurrentSession(session)) return;
-        dispatch(setContactsLoading(true));
-        dispatch(setContactsError(null));
-        try {
-            const items = await contactService.getUserList();
-            assertCurrentSession(session);
-
-            const serverFriends = items
-                .filter(item => item.type === 0)
-                .map(item => mapUserToContact(item, "friend"));
-
-            const serverGroups = items
-                .filter(item => item.type === 1)
-                .map(item => mapUserToContact(item, "group"));
-
-            // Lấy danh sách Redux mới nhất, tránh sử dụng friends từ closure cũ.
-            const currentFriends = store.getState().contacts.friends;
-
-            const mergedFriends: ContactEntry[] = serverFriends.map(friend => ({
-                ...friend,
-                online: currentFriends.find(existing => existing.id.toLowerCase() === friend.id.toLowerCase())?.online,
-            }));
-
-            currentFriends.forEach(friend => {
-                const existed = mergedFriends.some(
-                    item => item.name.toLowerCase() === friend.name.toLowerCase()
-                );
-
-                if (!existed) {
-                    mergedFriends.push(friend);
+    const refreshUserList = useCallback(():Promise<UserListItem[]|null> => {
+        if(!isCurrentSession(session))return Promise.resolve(null);
+        if(contactsRefresh.current)return contactsRefresh.current;
+        const revision=groupRevision.current;
+        dispatch(setContactsLoading(true));dispatch(setContactsError(null));
+        const task=(async()=>{
+            try {
+                const items=await contactService.getUserList();
+                assertCurrentSession(session);
+                const current=store.getState().contacts;
+                const mergedFriends:ContactEntry[]=items.filter(item=>item.type===0).map(item=>{
+                    const existing=current.friends.find(friend=>sameGroupName(friend.id,item.name));
+                    return {...mapUserToContact(item,'friend'),id:existing?.id??item.name,online:existing?.online,onlineCheckedAt:existing?.onlineCheckedAt};
+                });
+                for(const friend of current.friends)if(!mergedFriends.some(item=>sameGroupName(item.id,friend.id)))mergedFriends.push(friend);
+                dispatch(setFriends(mergedFriends));
+                // A stale list cannot undo a CREATE/JOIN/OUT_ROOM confirmed during the request.
+                if(revision!==groupRevision.current)return null;
+                const serverGroups=items.filter(item=>item.type===1).map(item=>{
+                    const existing=current.groups.find(group=>sameGroupName(group.id,item.name));
+                    return {...mapUserToContact(item,'group'),id:existing?.id??item.name};
+                });
+                dispatch(setGroups(serverGroups));
+                for(const entry of roomBuffer.drain(serverGroups.map(group=>group.id))) {
+                    const group=serverGroups.find(g=>sameGroupName(g.id,entry.message.to));
+                    if(group)publishRoomMessage(entry.message,group,entry.receivedAt);
                 }
-            });
+                setSelectedChat(previous=>previous?.kind==='group'&&!serverGroups.some(g=>sameGroupName(g.id,previous.name))?null:previous);
+                setContactsInitialized(true);
+                return items;
+            } catch(error) {
+                if(isCurrentSession(session))dispatch(setContactsError(error instanceof Error?error.message:'Không tải được danh bạ.'));
+                return null;
+            } finally {
+                if(isCurrentSession(session))dispatch(setContactsLoading(false));
+            }
+        })();
+        contactsRefresh.current=task;
+        void task.finally(()=>{if(contactsRefresh.current===task)contactsRefresh.current=null;});
+        return task;
+    },[dispatch,store,session,roomBuffer,publishRoomMessage]);
 
-            dispatch(setFriends(mergedFriends));
-            dispatch(setGroups(serverGroups));
-
-        } catch (error) {
-            const message = error instanceof Error ? error.message : "Không tải được danh bạ.";
-            if (isCurrentSession(session)) dispatch(setContactsError(message));
-            console.error("Không thể cập nhật danh sách:", error);
-        } finally {
-            if (isCurrentSession(session)) {dispatch(setContactsLoading(false)); setContactsInitialized(true);}
-        }
-    }, [dispatch, store, session]);
-
-    // Socket sau RE_LOGIN là một socket mới: cập nhật danh bạ khi kết nối hồi phục.
-    useEffect(() => {
-        if (connectionStatus === 'CONNECTED') void refreshUserList();
-    }, [connectionStatus, refreshUserList]);
+    // After LOGIN/RE_LOGIN refresh membership, then catch up the open chat and changed/cached chats.
+    // Sequential dispatch avoids flooding an API with no request IDs.
+    useEffect(()=>{
+        if(connectionStatus!=='CONNECTED')return;
+        const socket=websocketService.getSocket();
+        if(!socket)return;
+        let cancelled=false;
+        const active=()=>!cancelled&&isCurrentSession(session)&&websocketService.getSocket()===socket;
+        const synchronize=async()=>{
+            const items=await refreshUserList();
+            if(!items||!active())return;
+            const before=lastActivitySnapshot.current;
+            const plan=reconnectHistoryPlan(items,before,Object.keys(store.getState().messages.historyByChat),selectedForSync.current);
+            const snapshot=new Map(items.map(item=>[activityKey(item),item.actionTime]));
+            // Preserve previous actionTime on failed or skipped sync so the next reconnect retries.
+            lastActivitySnapshot.current=before?new Map(before):snapshot;
+            for(const target of plan) {
+                if(!active())return;
+                if(isHistoryUnsupported(target.kind))continue;
+                const args={username:target.username,chatId:target.chatId,page:1,force:true};
+                const cached=store.getState().messages.messages.filter(m=>m.chatId===target.chatId&&!/^(live|ack|local):/.test(m.id));
+                const known=new Set(cached.map(m=>m.id));
+                // Backfill until an existing server row is reached. Bound each reconnect to ten pages per chat.
+                let ok=false;
+                let failed=false;
+                for(let page=1;page<=10&&active();page++) {
+                    const result=await dispatch(target.kind==='room'?fetchRoomChatHistory({...args,page}):fetchPeopleChatHistory({...args,page}));
+                    if(!active())return;
+                    if(result.meta.requestStatus!=='fulfilled'){failed=true;break;}
+                    const rows=(result.payload as {messages:{id:string}[]}).messages;
+                    if(rows.length<50||known.size===0||rows.some(row=>known.has(row.id))) {ok=true;break;}
+                }
+                const key=`${target.kind==='room'?1:0}:${target.username.trim().toLowerCase()}`;
+                if(ok&&snapshot.has(key))lastActivitySnapshot.current?.set(key,snapshot.get(key)!);
+                // Avoid a reconnect cascade if the uncorrelated response channel timed out.
+                if(failed)return;
+                if(!ok && active())dispatch(setContactsError(`Lịch sử ${target.username} chưa đồng bộ hết sau 10 trang. Hãy tải thêm hoặc làm mới hội thoại.`));
+            }
+        };
+        void synchronize().catch(error=>{if(active())dispatch(setContactsError(error instanceof Error?error.message:"Không đồng bộ được lịch sử."));});
+        return ()=>{cancelled=true;};
+    },[connectionStatus,refreshUserList,dispatch,session,store]);
 
     // Tìm tin nhắn mới nhất và lọc theo tên cuộc trò chuyện
     // Sắp xếp theo hoạt động mới nhất và không để các gói reaction nội bộ
@@ -355,7 +389,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         }
         return chats.map(chat => {
             const latestMessage = latestByChat.get(chat.id.toLowerCase());
-            const preview = latestMessage ? mediaMessagePreview(legacyMediaPreview(visibleMessageContent(latestMessage.content))) : '';
+            const preview = latestMessage ? mediaMessagePreview(visibleMessageContent(latestMessage.content)) : '';
             return {
                 ...chat,
                 unreadCount: getChatUnread(unreadLedger, chat.id),
@@ -372,6 +406,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const unreadChats = useMemo(() => presentedChats.filter(chat => (chat.unreadCount ?? 0) > 0), [presentedChats]);
     const unreadTotal = getTotalUnreadForChats(unreadLedger, chats.map(chat => chat.id));
     const openConversation = (chat: Chat) => {
+        setPresenceError(null);
         setSelectedChat(chat);
         setNotificationsOpen(false);
         if (document.visibilityState === 'visible' && document.hasFocus()) {
@@ -382,7 +417,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const currentChat = useMemo(() => {
         if (!selectedChat || selectedChat.kind === 'group') return selectedChat;
         const friend = friends.find(item => item.id.toLowerCase() === selectedChat.id.toLowerCase());
-        return friend ? {...selectedChat, online: friend.online} : selectedChat;
+        return {...selectedChat, online: friend?.online};
     }, [selectedChat, friends]);
 
     const handleLogout = async () => {
@@ -403,12 +438,14 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     // Xóa dữ liệu nhóm trên giao diện CHỈ sau khi OUT_ROOM được máy chủ xác nhận.
     const onGroupLeft = (roomName: string) => {
         if (!isCurrentSession(session)) return;
+        groupRevision.current++;
+        roomBuffer.discard(roomName);
         dispatch(removeGroup(roomName));
         dispatch(clearConversationMessages(roomChatId(roomName)));
         setUnreadLedger(previous => markChatRead(previous, roomChatId(roomName)));
         setSelectedChat(previous => previous?.kind === 'group' && sameGroupName(previous.name, roomName) ? null : previous);
         setGroupNotice(`Bạn đã rời nhóm “${roomName}”.`);
-        void refreshUserList();
+        void refreshUserList().then(()=>{if(isCurrentSession(session))void refreshUserList();});
     };
 
     const leaveGroupFromDashboard = async (roomName: string) => {
@@ -445,8 +482,14 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                 const created = composeMode === "group" ? await createRoom(value) : await joinRoom(value);
                 assertCurrentSession(session);
                 const contact = makeGroupContact(created);
+                groupRevision.current++;
                 dispatch(addGroup(contact));
+                for(const entry of roomBuffer.drain(store.getState().contacts.groups.map(group=>group.id))) {
+                    const group=store.getState().contacts.groups.find(g=>sameGroupName(g.id,entry.message.to));
+                    if(group)publishRoomMessage(entry.message,group,entry.receivedAt);
+                }
                 openGroup(contact);
+                void refreshUserList().then(()=>{if(isCurrentSession(session))void refreshUserList();});
                 setGroupNotice(composeMode === 'group'
                     ? `Đã tạo nhóm “${created.name}” và được máy chủ xác nhận.`
                     : `Đã tham gia nhóm “${created.name}” thành công.`);
@@ -459,67 +502,6 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
             setComposeError(readableGroupError(error));
         } finally { setComposeBusy(false); }
     };
-
-    useEffect(() => {
-        let cancelled = false;
-
-        const loadContacts = async () => {
-            if (!isCurrentSession(session)) return;
-            dispatch(setContactsLoading(true));
-            dispatch(setContactsError(null));
-
-            try {
-                const items = await contactService.getUserList();
-
-                if (cancelled || !isCurrentSession(session)) return;
-
-                const friends = items
-                    .filter(item => item.type === 0)
-                    .map(item => mapUserToContact(item, "friend"));
-
-                const groups = items
-                    .filter(item => item.type === 1)
-                    .map(item => mapUserToContact(item, "group"));
-
-                // Keep contacts discovered through incoming WebSocket frames while
-                // GET_USER_LIST is in flight, so their unread badges remain reachable.
-                const latestFriends = store.getState().contacts.friends;
-                const mergedFriends: ContactEntry[] = friends.map(friend => ({
-                    ...friend,
-                    online: latestFriends.find(existing => existing.id.toLowerCase() === friend.id.toLowerCase())?.online,
-                }));
-                latestFriends.forEach(friend => {
-                    if (!mergedFriends.some(item => item.id.toLowerCase() === friend.id.toLowerCase())) {
-                        mergedFriends.push(friend);
-                    }
-                });
-                dispatch(setFriends(mergedFriends));
-                dispatch(setGroups(groups));
-
-            } catch (error) {
-                if (!cancelled && isCurrentSession(session)) {
-                    dispatch(
-                        setContactsError(
-                            error instanceof Error
-                                ? error.message
-                                : "Không thể tải danh bạ"
-                        )
-                    );
-                }
-            } finally {
-                if (!cancelled && isCurrentSession(session)) {
-                    dispatch(setContactsLoading(false));
-                    setContactsInitialized(true);
-                }
-            }
-        };
-
-        void loadContacts();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [dispatch, store, session]);
 
     const handleSearchUser = async (username: string) => {
         const user = username.trim();
@@ -569,6 +551,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                 color: "#989bff",
                 detail: "",
                 online,
+                onlineCheckedAt: online === undefined ? undefined : Date.now(),
             };
 
             // Không thêm trùng tài khoản.
@@ -607,8 +590,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                 username: selectedChat.name, chatId: selectedChat.id, page: 1, force: true,
             }));
         } else {
-            // ChatWindow đảm nhiệm việc làm mới nhóm theo chu kỳ và khi lấy focus.
-            dispatch(invalidateHistory());
+            await dispatch(fetchRoomChatHistory({username:selectedChat.name,chatId:selectedChat.id,page:1,force:true}));
         }
     };
 

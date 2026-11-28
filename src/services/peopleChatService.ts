@@ -24,12 +24,13 @@ type ApiSentPeopleMessage = {
   type?: number | string;
 };
 
-const uncertainSockets = new WeakSet<WebSocket>();
+
 const acknowledgedIds = new WeakMap<WebSocket, Set<string>>();
 const RESPONSE_TIMEOUT_MS = 10_000;
 
 class SendConfirmationMissingError extends Error {}
-export class UnconfirmedSendError extends Error {}
+import { ensureCorrelatedConnection, quarantineResponse, UnconfirmedSendError } from './requestCorrelation.ts';
+export { UnconfirmedSendError } from './requestCorrelation.ts';
 
 
 function mapMessage(message: ApiPeopleMessage, chatId: string): ChatMessage {
@@ -59,31 +60,30 @@ function validateMessages(data: unknown): ApiPeopleMessage[] {
         typeof message.to !== "string" ||
         typeof message.mes !== "string" ||
         typeof message.createAt !== "string" ||
-        typeof message.type !== "number"
+        ![0,"0","people"].includes(message.type as number|string)
     ) {
       throw new Error("Tin nhắn thiếu dữ liệu.");
     }
 
-    return message as ApiPeopleMessage;
+    return {...message,type:0} as ApiPeopleMessage;
   });
 }
 
-function requestHistory(username: string, page: number): Promise<WebSocketMessage> {
+function requestHistory(username: string, page: number, signal?: AbortSignal): Promise<WebSocketMessage> {
   // Theo API giảng viên, người và phòng dùng chung CHAT_PEOPLE_GET_MES.
   // Hàng đợi chung ngăn phản hồi của nhóm bị gán nhầm cho chat cá nhân.
-  return requestChatHistory(username,page,'people',RESPONSE_TIMEOUT_MS);
+  return requestChatHistory(username,page,'people',RESPONSE_TIMEOUT_MS,signal);
 }
 
 function requestSendMessage(sender: string, recipient: string, content: string, session: AbortSignal, knownIds: Set<string>): Promise<WebSocketMessage> {
   assertCurrentSession(session);
   const socket = websocketService.getSocket();
-  if (socket && uncertainSockets.has(socket)) return Promise.reject(new Error("Lần gửi trước chưa được xác nhận. Hãy kiểm tra lịch sử và kết nối lại trước khi gửi tiếp."));
   return new Promise<WebSocketMessage>((resolve, reject) => {
     let unsubscribeMessage = () => {};
     let unsubscribeStatus = () => {};
     let settled = false;
     const timeout = setTimeout(() => {
-      if (socket) uncertainSockets.add(socket);
+      quarantineResponse(socket,'send');
       cleanup();
       reject(new SendConfirmationMissingError("Chưa nhận được xác nhận từ máy chủ."));
     }, RESPONSE_TIMEOUT_MS);
@@ -127,7 +127,7 @@ function requestSendMessage(sender: string, recipient: string, content: string, 
 
     unsubscribeStatus = websocketService.onStatus((status) => {
       if (status === "ERROR" || status === "DISCONNECTED") {
-        if (socket) uncertainSockets.add(socket);
+        quarantineResponse(socket,'send');
         cleanup();
         reject(new SendConfirmationMissingError("Mất kết nối khi gửi tin nhắn."));
       }
@@ -143,14 +143,14 @@ function requestSendMessage(sender: string, recipient: string, content: string, 
 }
 
 export const peopleChatService = {
-  async getHistory(username: string, page = 1): Promise<ChatMessage[]> {
+  async getHistory(username: string, page = 1, signal?: AbortSignal): Promise<ChatMessage[]> {
     if (!username.trim()) throw new Error('Chưa chọn người trò chuyện.');
     const pageNumber = Number.isInteger(page) && page > 0 ? page : 1;
 
     const session = currentSessionSignal();
     await ensureLoginConnection(session);
     assertCurrentSession(session);
-    const response = await requestHistory(username, pageNumber);
+    const response = await requestHistory(username, pageNumber, signal);
     assertCurrentSession(session);
 
     if (response.status === "error") {
@@ -182,16 +182,8 @@ export const peopleChatService = {
     try {
       response = await enqueueChatSend(async queuedSession => {
         assertCurrentSession(session);
-        await ensureLoginConnection(queuedSession);
+        await ensureCorrelatedConnection(queuedSession,'send');
         assertCurrentSession(session);
-        // A late ACK without a request ID could otherwise confirm the next send.
-        // Recycle only the uncertain transport, keeping the same account lifetime.
-        const socket = websocketService.getSocket();
-        if (socket && uncertainSockets.has(socket)) {
-          socket.close();
-          await ensureLoginConnection(queuedSession);
-          assertCurrentSession(session);
-        }
         const user = getAuthenticatedUsername();
         if (!user || user.trim().toLowerCase() !== sender.trim().toLowerCase()) throw new Error('Người gửi không thuộc phiên hiện tại.');
         return requestSendMessage(sender, recipient, transportContent, session, new Set(knownMessageIds));
@@ -215,7 +207,7 @@ export const peopleChatService = {
     const recipientName = responseData.to ?? recipient;
 
     return {
-      id: String(responseData.id ?? crypto.randomUUID()),
+      id: String(responseData.id ?? `ack:${crypto.randomUUID()}`),
       chatId: recipient,
       senderId: senderName,
       senderName,
@@ -224,6 +216,7 @@ export const peopleChatService = {
       content: decodeChatContent(responseData.mes ?? transportContent),
       createdAt: responseData.createAt ?? new Date().toISOString(),
       orderAt,
+      sendStatus: 'confirmed',
       type: typeof responseData.type === "number" ? responseData.type : 0,
     };
   },

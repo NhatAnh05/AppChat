@@ -885,7 +885,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  isolation: isolate;
+  isolation: auto;
 }
 .lyra-conversation-content > .lyra-workspace-toolbar {
   flex: 0 0 auto;
@@ -897,7 +897,7 @@
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  overflow-anchor: auto;
+  overflow-anchor: none;
   margin: 0;
 }
 
@@ -907,20 +907,21 @@
 .lyra-conversation-content > .message-list {
   display: block;
   position: relative;
-  isolation: isolate;
-  contain: layout paint;
+  isolation: auto;
+  /* Keep the scroll viewport in the ordinary paint flow. */
+  contain: none;
   scrollbar-gutter: stable;
 }
-.lyra-conversation-content > .message-list > .message-row {
+.lyra-conversation-content .lyra-history-content > .message-row {
   display: flex;
   width: 100%;
   height: auto;
   min-height: 0;
   margin-bottom: 12px;
 }
-.lyra-conversation-content > .message-list > .empty-messages,
-.lyra-conversation-content > .message-list > .history-error,
-.lyra-conversation-content > .message-list > .history-load-more {
+.lyra-history-content > .empty-messages,
+.lyra-history-content > .history-error,
+.lyra-history-content > .history-load-more {
   position: relative;
 }
 
@@ -1265,7 +1266,8 @@
   min-height: 86px;
   padding: 16px 18px;
   background: rgba(255,255,255,.88);
-  backdrop-filter: blur(10px);
+  /* Avoid a composited backdrop next to the scrolling chat history. */
+  backdrop-filter: none;
 }
 
 .lyra-workspace .chat-window-header .chat-avatar {
@@ -1714,3 +1716,82 @@ body { letter-spacing: 0; }
   .lyra-workspace .hero-empty p { font-size: 12px; }
   .lyra-workspace .empty-chat-primary { font-size: 12px; white-space: normal; }
 }
+
+
+/* Chat history: one viewport, one block per message, stable media geometry.
+   Do not promote rows or the header into separate forced GPU layers. */
+.lyra-conversation-content > .message-list {
+  display:block; contain:none; isolation:auto; overflow-anchor:none;
+  min-height:0; min-width:0; scroll-behavior:auto;
+}
+.lyra-history-content { display:block; min-width:0; }
+.lyra-conversation-content .lyra-history-content > .message-row {
+  display:grid; grid-template-columns:minmax(0,1fr); align-items:start;
+  width:100%; height:auto; min-height:0; margin:0; padding:0 0 12px;
+  position:relative; overflow:visible;
+}
+.lyra-history-content > .message-row.sent { justify-items:end; }
+.lyra-history-content > .message-row.received { justify-items:start; }
+.lyra-history-content > .message-row.is-selecting { grid-template-columns:26px minmax(0,1fr); }
+.lyra-history-content > .message-row.is-selecting > .lyra-workspace-checkbox { justify-self:center; margin:10px 0; }
+.lyra-workspace .message-row .message-content-wrap { width:max-content; min-width:0; max-width:min(78%,680px); }
+.lyra-workspace .message-row .message-body { display:grid; grid-template-columns:minmax(0,1fr); min-width:0; max-width:100%; }
+.lyra-workspace .message-row.received .message-body { grid-template-columns:30px minmax(0,1fr); }
+.lyra-workspace .message-row .lyra-message-core { display:grid; grid-template-columns:minmax(0,1fr); justify-items:start; align-items:start; min-width:0; max-width:100%; }
+.lyra-workspace .message-row.sent .lyra-message-core { justify-items:end; }
+.lyra-workspace .message-row .message-bubble { width:max-content; min-width:0; max-width:100%; height:auto; box-shadow:none; }
+.lyra-workspace .message-bubble.has-media { padding:6px; max-width:min(100%,380px); }
+.lyra-workspace .chat-media { min-width:0; width:max-content; max-width:100%; }
+.lyra-workspace .chat-media .lyra-visual-media {
+  display:block; width:max-content; max-width:min(320px,100%);
+  border-radius:10px; background:#0000000a;
+}
+.lyra-workspace .chat-media .lyra-visual-media img,
+.lyra-workspace .chat-media video.lyra-visual-media {
+  display:block; width:auto; height:auto; max-width:100%; max-height:300px;
+  object-fit:contain; border-radius:10px;
+}
+.lyra-workspace .chat-media video.lyra-visual-media { width:auto; height:auto; max-width:min(320px,100%); max-height:300px; }
+.lyra-workspace .chat-media a { max-width:100%; }
+.lyra-workspace .lyra-replied-preview { min-width:0; max-width:min(300px,100%); }
+.lyra-workspace .lyra-replied-preview span { max-width:100%; }
+.lyra-workspace .lyra-message-status { display:block; max-width:100%; font-size:11px; line-height:1.5; overflow-wrap:anywhere; margin-top:3px; }
+.lyra-workspace .lyra-message-reactions { margin-top:3px; max-width:100%; }
+/* Actions have a reserved row rather than overlapping another message. */
+.lyra-workspace .message-row .lyra-message-actions { position:relative; inset:auto; opacity:.72; margin-top:3px; z-index:auto; transition:none; }
+.lyra-workspace .message-row:hover .lyra-message-actions,
+.lyra-workspace .message-row:focus-within .lyra-message-actions { opacity:1; }
+.lyra-workspace .message-row.received .lyra-react-picker { left:0; right:auto; }
+.lyra-workspace .lyra-react-picker { max-width:min(250px,75vw); flex-wrap:wrap; }
+/* Keep the familiar hover toolbar on spacious desktop layouts. Narrow panes
+   reserve an in-flow toolbar so buttons cannot run off the viewport. */
+@media (min-width:1200px) and (hover:hover) {
+  .lyra-workspace .message-row.sent .lyra-message-actions { position:absolute; right:calc(100% + 7px); top:2px; left:auto; opacity:0; }
+  .lyra-workspace .message-row.received .lyra-message-actions { position:absolute; left:calc(100% + 7px); top:2px; right:auto; opacity:0; }
+  .lyra-workspace .message-row:hover .lyra-message-actions,
+  .lyra-workspace .message-row:focus-within .lyra-message-actions { opacity:1; }
+}
+.lyra-workspace .message-input-container { flex-wrap:wrap; width:auto; }
+.lyra-workspace .message-input-container .lyra-composer-error { flex:0 0 100%; min-width:0; width:100%; margin:0; overflow-wrap:anywhere; }
+.lyra-composer-error span { flex:1 1 auto; min-width:0; }
+.lyra-composer-error button { flex:0 0 auto; }
+.lyra-file-card { display:flex!important; align-items:center; gap:8px; padding:6px; color:inherit; text-decoration:none; max-width:100%; min-width:0; }
+.lyra-file-card i { font-size:22px; flex:none; }
+.lyra-file-card span { display:flex; flex-direction:column; gap:2px; min-width:0; overflow-wrap:anywhere; }
+.lyra-file-card small { opacity:.8; }
+.lyra-media-fallback { display:flex; flex-wrap:wrap; gap:6px; align-items:center; max-width:300px; padding:8px; font-size:12px; }
+.lyra-media-fallback span { flex:1 1 160px; }
+.lyra-media-fallback a, .lyra-media-fallback button { color:inherit; font:inherit; }
+.lyra-media-fallback button { border:1px solid currentColor; background:none; border-radius:6px; padding:3px 8px; cursor:pointer; }
+@media(max-width:640px) {
+  .lyra-workspace .message-row .message-content-wrap { max-width:100%; }
+  .lyra-workspace .message-list { padding:12px 9px; }
+  .lyra-workspace .message-row .lyra-message-actions { flex-wrap:wrap; max-width:100%; }
+  .lyra-workspace .message-input-container { gap:4px; }
+  .lyra-workspace .message-input-container .message-input { flex:1 1 100px; min-width:0; }
+  .lyra-message-actions { position:static; opacity:1; margin-top:3px; }
+}
+
+.lyra-file-download { border:0; background:transparent; text-align:left; cursor:pointer; font:inherit; }
+.lyra-file-download:disabled { cursor:wait; opacity:.65; }
+.lyra-file-error { max-width:300px; margin:4px 6px; font-size:12px; overflow-wrap:anywhere; }

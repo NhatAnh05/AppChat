@@ -38,12 +38,15 @@ function parseFrame(input:unknown, event:string):Record<string,unknown>|null {
 function parseMembers(value:unknown):CreatedRoomMember[]|null {
   if(!Array.isArray(value))return null;
   const members:CreatedRoomMember[]=[];
-  for(const item of value){const member=record(item);if(!member||!Number.isInteger(member.id)||typeof member.name!=='string'||!member.name.trim())return null;
-    members.push({id:member.id as number,name:member.name.trim()});}
+  for(const item of value){const member=record(item);if(!member||typeof member.name!=='string'||!member.name.trim())return null;
+    const id=typeof member.id==='number'?member.id:typeof member.id==='string'&&/^\d+$/.test(member.id)?Number(member.id):NaN;
+    if(!Number.isSafeInteger(id))return null;
+    members.push({id,name:member.name.trim()});}
   return members;
 }
 function parseRoom(value:unknown):RoomDetails|null {
-  const data=record(value);
+  const outer=record(value);
+  const data=outer && !('name' in outer) ? record(outer.data) : outer;
   if(!data || typeof data.name!=='string'||!data.name.trim()||!Array.isArray(data.chatMess))return null;
   const user=parseMembers(data.user);if(!user)return null;
   return {name:data.name.trim(),user,chatMess:data.chatMess};
@@ -74,11 +77,18 @@ export function parseRoomHistoryResponse(input:unknown, name:string):
   const frame=parseFrame(input,ROOM_HISTORY_EVENT) ?? parseFrame(input,CHAT_HISTORY_EVENT);
   if(!frame)return null;
   if(frame.status==='error')return {status:'error',message:typeof frame.mes==='string'?frame.mes:'Không tải được lịch sử nhóm.'};
-  if(frame.status!=='success')return {status:'error',message:'Máy chủ chưa xác nhận lịch sử nhóm.'};
+  if(frame.status!==undefined&&frame.status!=='success')return {status:'error',message:'Máy chủ chưa xác nhận lịch sử nhóm.'};
   const room=parseRoom(frame.data);
   if(!room||room.name.toLowerCase()!==name.trim().toLowerCase())return {status:'error',message:'Dữ liệu lịch sử không khớp tên nhóm.'};
   const messages:ChatMessage[]=[];
-  for(const item of room.chatMess){ const row=record(item);const message=mapRoomMessage(item,name);if(!message||!row||(typeof row.id!=='string' && typeof row.id!=='number')||typeof row.createAt!=='string')return {status:'error',message:'Lịch sử chứa bản ghi không hợp lệ.'};messages.push(message); }
+  for(const item of room.chatMess){
+    const outer=record(item);const row=outer && !('name' in outer)?record(outer.data):outer;
+    if(!row || typeof row.to!=='string' || row.to.trim().toLowerCase()!==name.trim().toLowerCase() || ![1,'1','room'].includes(row.type as number|string))return {status:'error',message:'Lịch sử chứa bản ghi không thuộc nhóm.'};
+    if(typeof row.mes==='string' && !row.mes.trim())continue;
+    const message=mapRoomMessage(row,name);
+    if(!message||(typeof row.id!=='string' && typeof row.id!=='number')||typeof row.createAt!=='string')return {status:'error',message:'Lịch sử chứa bản ghi không hợp lệ.'};
+    messages.push(message);
+  }
   return {status:'success',room,messages};
 }
 export function parseRoomSendResponse(input:unknown, name:string, content:string):

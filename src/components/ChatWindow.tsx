@@ -1,14 +1,13 @@
 import { currentSessionSignal, isCurrentSession } from '../services/sessionScope.ts';
 import { useEffect, useState } from 'react'
-import { useDispatch } from 'react-redux'
+import { useDispatch, useSelector } from 'react-redux'
 import { fetchPeopleChatHistory, fetchRoomChatHistory } from '../features/messages/messagesSlice'
-import type { AppDispatch } from '../store/store'
+import type { AppDispatch, RootState } from '../store/store'
 import MessageList from './MessageList'
 import MessageInput from './MessageInput'
 import type { Chat } from '../types/chat'
 import type { ReplyReference } from '../services/messageInteractions'
-import { getRoomHistory, leaveRoom } from '../services/roomChatService.ts'
-import type { CreatedRoomMember } from '../services/createRoomProtocol.ts'
+import { leaveRoom } from '../services/roomChatService.ts'
 import { readableGroupError } from '../services/groupManagement.ts'
 import { isHistoryUnsupported } from '../services/chatHistoryTransport.ts'
 import { normalizeSearch } from '../services/messageWorkspace.ts'
@@ -28,29 +27,30 @@ type ChatWindowProps = {
     onOpenSettings?: () => void
 }
 
-export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLeft, presenceError, unreadCount = 0, onOpenNotifications, onCompose, onOpenSettings}: ChatWindowProps) {
+export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLeft, onCheckPresence, presenceChecking, presenceError, unreadCount = 0, onOpenNotifications, onCompose, onOpenSettings}: ChatWindowProps) {
     const dispatch = useDispatch<AppDispatch>()
     const [session] = useState(currentSessionSignal)
     const [detailOpen, setDetailOpen] = useState(false)
     const [toolsOpen, setToolsOpen] = useState(false)
-    const [members, setMembers] = useState<CreatedRoomMember[]>([])
     const [memberQuery, setMemberQuery] = useState('')
     const [groupFeedback, setGroupFeedback] = useState('')
     const [mentionRequest, setMentionRequest] = useState<{id:number;text:string}|null>(null)
     const [roomError, setRoomError] = useState('')
     const [leaveBusy, setLeaveBusy] = useState(false)
     const [leaveConfirm, setLeaveConfirm] = useState(false)
-    const [membersLoading, setMembersLoading] = useState(false)
     const [replyTo, setReplyTo] = useState<ReplyReference | null>(null)
     const [callMode, setCallMode] = useState<"voice" | "video" | null>(null)
 
     const chatId = chat?.id;
     const chatKind = chat?.kind;
     const chatName = chat?.name;
+    const history=useSelector((state:RootState)=>chatId?state.messages.historyByChat[chatId]:undefined);
+    const members=history?.roomMembers??[];
+    const membersLoading=Boolean(history?.loading);
 
     useEffect(() => {
         if (!chatId || chatName === undefined || !isCurrentSession(session)) return
-        void dispatch(chatKind === 'group' ? fetchRoomChatHistory({username:chatName,chatId:chatId,page:1}) : fetchPeopleChatHistory({username: chatName, chatId: chatId, page: 1}))
+        void dispatch(chatKind === 'group' ? fetchRoomChatHistory({username:chatName,chatId:chatId,page:1,force:true}) : fetchPeopleChatHistory({username: chatName, chatId: chatId, page: 1,force:true}))
     }, [chatId, chatKind, chatName, dispatch, session])
 
     // Nhận tin mới qua SEND_CHAT. Đồng bộ dự phòng chỉ một lần/phút, KHÔNG gọi
@@ -72,20 +72,12 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
         if (!isCurrentSession(session)) return;
         setDetailOpen(true);
         setRoomError('');
-        setMembers([]);
         setMemberQuery('');
         setGroupFeedback('');
         setLeaveConfirm(false);
-        if (chat?.kind === 'group') {
-            setMembersLoading(true);
-            try {
-                const {room} = await getRoomHistory(chat.name, 1);
-                setMembers(room.user);
-            } catch (error) {
-                setRoomError(readableGroupError(error));
-            } finally {
-                setMembersLoading(false);
-            }
+        if (chat?.kind === 'group' && !history?.loading) {
+            const result=await dispatch(fetchRoomChatHistory({username:chat.name,chatId:chat.id,page:1,force:true}));
+            if(isCurrentSession(session)&&fetchRoomChatHistory.rejected.match(result)&&!result.meta.condition) setRoomError(readableGroupError(result.payload??result.error.message));
         }
     };
     const copyGroupName = async () => {
@@ -143,6 +135,7 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
                     {chat.kind === 'people' && presenceError && <small role="status" title={presenceError} style={{color:'#b45309',fontSize:'11px'}}>Không kiểm tra được: {presenceError}</small>}
                 </div>
                 <div className="chat-header-actions">
+                    {chat.kind === 'people' && onCheckPresence && <button type="button" className="chat-circle-btn" title="Cập nhật trạng thái hoạt động" aria-label="Cập nhật trạng thái hoạt động" disabled={presenceChecking} onClick={() => void onCheckPresence(chat.id)}><i className="bi bi-arrow-clockwise" /></button>}
                     <button type="button" className="chat-circle-btn lyra-bell-button" title="Thông báo" aria-label={`Thông báo${unreadCount ? `: ${unreadCount} tin chưa đọc` : ""}`} onClick={onOpenNotifications}><i className="bi bi-bell" />{unreadCount > 0 && <span className="lyra-bell-dot"/>}</button>
                     <button type="button" className="chat-tools-trigger" title="Tìm kiếm và công cụ tin nhắn" aria-label="Tìm kiếm và công cụ tin nhắn" aria-expanded={toolsOpen} onClick={() => setToolsOpen(old => !old)}><i className="bi bi-search" /></button>
                     <button type="button" className="chat-circle-btn" title="Gọi thoại" aria-label="Gọi thoại" onClick={() => setCallMode("voice")}><i className="bi bi-telephone" /></button>
@@ -188,7 +181,7 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
                             </div>)}
                         </div>
                         {!membersLoading && !roomError && members.length > 0 && filteredMembers.length === 0 && <p className="lyra-small-note">Không tìm thấy thành viên.</p>}
-                        {roomError && <p role="alert" className="login-error">{roomError}</p>}
+                        {(roomError || history?.error) && <p role="alert" className="login-error">{roomError || history?.error}</p>}
                         {!leaveConfirm ? (
                             <button type="button" className="lyra-group-leave-trigger" onClick={() => { setRoomError(''); setLeaveConfirm(true); }}>
                                 <i className="bi bi-box-arrow-right" /> Rời nhóm
@@ -221,7 +214,7 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
             </div>}
 
             <MessageList
-                key={`${currentUserId}:${chat.id}`}
+                key={`history:${currentUserId}:${chat.id}`}
                 chatId={chat.id}
                 currentUserId={currentUserId}
                 username={chat.name}
@@ -232,7 +225,7 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
             />
 
             <MessageInput
-                key={`${currentUserId}:${chat.id}`}
+                key={`composer:${currentUserId}:${chat.id}`}
                 chatId={chat.id}
                 currentUserId={currentUserId}
                 isGroup={chat.kind === 'group'}

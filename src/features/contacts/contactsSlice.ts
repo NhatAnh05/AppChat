@@ -74,7 +74,7 @@ const contactsSlice = createSlice({
 
     setContactOnline: (
         state,
-        action: PayloadAction<{ id: string; online: boolean }>
+        action: PayloadAction<{ id: string; online: boolean | undefined; checkedAt?: number }>
     ) => {
       const contact = state.friends.find(
           friend => friend.id.toLowerCase() === action.payload.id.toLowerCase()
@@ -82,11 +82,19 @@ const contactsSlice = createSlice({
 
       if (contact) {
         contact.online = action.payload.online;
+        contact.onlineCheckedAt = action.payload.online === undefined ? undefined : action.payload.checkedAt;
       }
     },
 
+    expireOnlineStatuses: (state, action: PayloadAction<number>) => {
+      state.friends.forEach(friend => {
+        if (friend.online !== undefined && (!friend.onlineCheckedAt || action.payload - friend.onlineCheckedAt >= 180_000)) {
+          friend.online = undefined; friend.onlineCheckedAt = undefined;
+        }
+      });
+    },
     clearOnlineStatuses: state => {
-      state.friends.forEach(friend => { friend.online = undefined; });
+      state.friends.forEach(friend => { friend.online = undefined; friend.onlineCheckedAt = undefined; });
     },
 
     setSelectedContact: (
@@ -129,6 +137,7 @@ export const {
   removeGroup,
   setContactOnline,
   clearOnlineStatuses,
+  expireOnlineStatuses,
   setSelectedContact,
   setContactsLoading,
   setContactsError,

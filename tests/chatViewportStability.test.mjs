@@ -37,9 +37,9 @@ test('Nhật ký API không làm toàn bộ chat rerender khi đóng modal', () 
   assert.doesNotMatch(source, /onLog\(entry => setApiLogs\(current =>/);
 });
 
-test('Danh sách tin nhắn dùng luồng block và lớp vẽ riêng để tránh lỗi cắt/chồng trên Edge', () => {
+test('Danh sách tin nhắn dùng luồng block và không ép paint containment', () => {
   const css = read('src/App.css');
   assert.match(css, /\.lyra-conversation-content\s*>\s*\.message-list\s*\{[^}]*display:\s*block\s*;/s);
-  assert.match(css, /\.lyra-conversation-content\s*>\s*\.message-list\s*\{[^}]*contain:\s*layout paint\s*;/s);
-  assert.match(css, /\.lyra-conversation-content\s*>\s*\.message-list\s*>\s*\.message-row\s*\{[^}]*height:\s*auto\s*;/s);
+  assert.match(css, /\.lyra-conversation-content\s*>\s*\.message-list\s*\{[^}]*contain:\s*none\s*;/s);
+  assert.match(css, /\.lyra-conversation-content\s+\.lyra-history-content\s*>\s*\.message-row\s*\{[^}]*height:\s*auto\s*;/s);
 });

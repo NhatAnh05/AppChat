@@ -1,5 +1,5 @@
 import { currentSessionSignal, assertCurrentSession } from './sessionScope.ts';
-import { ensureLoginConnection } from './loginService.ts';
+import { ensureCorrelatedConnection, enqueueAuthenticatedRequest } from './requestCorrelation.ts';
 import { normalizeRoomName, parseCreateRoomResponse, type CreatedRoom } from './createRoomProtocol.ts';
 import { websocketService } from './websocket.ts';
 
@@ -13,7 +13,7 @@ let pending: { name: string; promise: Promise<CreatedRoom>; session: AbortSignal
 async function sendCreateRoom(name: string, options: CreateRoomOptions): Promise<CreatedRoom> {
   if (options.signal?.aborted) throw new Error('Đã hủy tạo nhóm.');
   const session=currentSessionSignal();
-  await ensureLoginConnection(session);
+  await ensureCorrelatedConnection(session,'room-membership');
   assertCurrentSession(session);
   if (options.signal?.aborted) throw new Error('Đã hủy tạo nhóm.');
   const socket = websocketService.getSocket();
@@ -71,7 +71,7 @@ export function createRoom(rawName: string, options: CreateRoomOptions = {}): Pr
       ? pending.promise
       : Promise.reject(new Error('Đang tạo một nhóm khác, vui lòng hoàn tất yêu cầu hiện tại.'));
   }
-  const task = sendCreateRoom(name, options);
+  const task = enqueueAuthenticatedRequest(() => sendCreateRoom(name, options));
   pending = {name, promise:task,session};
   void task.then(() => { if (pending?.promise === task) pending = null; },
     () => { if (pending?.promise === task) pending = null; });

@@ -1,12 +1,15 @@
 import http from 'node:http';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, writeFile, stat, unlink } from 'node:fs/promises';
-import { randomUUID, createHmac, timingSafeEqual } from 'node:crypto';
+import { randomUUID, randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = process.env.MEDIA_UPLOAD_DIR || path.join(root, 'uploads');
+const localKey = process.env.LYRA_LOCAL_MEDIA_KEY || '';
+const localEnabled = process.env.LYRA_LOCAL_MEDIA_MODE === '1' && /^[0-9a-f]{64}$/.test(localKey);
+const localDir = process.env.MEDIA_LOCAL_UPLOAD_DIR || path.join(root, 'uploads-local');
 const maxBytes = 25 * 1024 * 1024;
 const maxConcurrentUploads = 10;
 const types = new Map([
@@ -25,6 +28,10 @@ const host = process.env.MEDIA_HOST || '127.0.0.1';
 // Do not expose this internal listener directly, even with a secret configured.
 if (!['127.0.0.1','::1'].includes(host)) throw new Error('MEDIA_HOST must be loopback. Use an authenticated HTTPS gateway.');
 await mkdir(uploadDir, { recursive:true, mode:0o700 });
+if (localEnabled) {
+  if (path.resolve(localDir) === path.resolve(uploadDir)) throw new Error('Local media must use isolated storage.');
+  await mkdir(localDir, {recursive:true,mode:0o700});
+}
 const json = (res, status, body) => {
   if (res.destroyed || res.headersSent) return;
   res.writeHead(status, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
@@ -92,16 +99,25 @@ function validContent(buffer, ext) {
   }
   return false;
 }
+const hash = value => createHash('sha256').update(value).digest('hex');
+const safeEqual = (a,b) => typeof a==='string' && typeof b==='string' && /^[0-9a-f]{64}$/.test(a) && /^[0-9a-f]{64}$/.test(b) && timingSafeEqual(Buffer.from(a,'hex'),Buffer.from(b,'hex'));
 const server = http.createServer(async (req,res) => {
   const pathname = (req.url || '/').split('?')[0];
-  if (req.method==='GET' && pathname==='/api/media/health') return json(res,enabled?200:503,{ok:enabled});
-  if (!enabled) return deny(req,res,503,'Media chưa cấu hình cổng xác thực.');
-  const match = /^\/api\/media\/files\/([A-Za-z0-9_-]+)(?:\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]+))?$/.exec(pathname);
+  const local = pathname.startsWith('/api/media/local/');
+  if (req.method==='GET' && pathname==='/api/media/health') return json(res,enabled?200:503,{ok:enabled,localAvailable:localEnabled});
+  if (local) {
+    if (!localEnabled || !safeEqual(req.headers['x-lyra-local-gateway'],localKey)) return deny(req,res,403,'Chế độ media thử nghiệm chỉ mở qua Vite localhost.');
+    if (req.method==='GET' && pathname==='/api/media/local/health') return json(res,200,{ok:true,mode:'local-sandbox'});
+  } else if (!enabled) return deny(req,res,503,'Media chưa cấu hình cổng xác thực. Chạy npm run dev:full -- --local-media để thử trên cùng máy.');
+  const match = /^\/api\/media\/(?:local\/)?files\/([A-Za-z0-9_-]+)(?:\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]+))?$/.exec(pathname);
   if (!match) return deny(req,res,404,'Không tìm thấy đường dẫn.');
   const [,encoded,id] = match;
   const scope = parseScope(encoded);
   if (!scope) return deny(req,res,400,'Hội thoại không hợp lệ.');
-  const owner = authenticate(req,pathname,scope);
+  // Local sandbox trusts the local OS/Vite process, NOT a teacher account.
+  // Read access is granted by a random per-file capability; never use this route in production.
+  const owner = local ? 'local-workspace' : authenticate(req,pathname,scope);
+  const directory = local ? localDir : uploadDir;
   if (!owner) return deny(req,res,401,'Cần xác thực và quyền truy cập hội thoại.');
   if (!allowRate(owner,req.method)) {res.setHeader('Retry-After','60');return deny(req,res,429,'Quá nhiều yêu cầu.');}
   if (req.method==='POST' && !id) {
@@ -114,7 +130,7 @@ const server = http.createServer(async (req,res) => {
     if (activeUploads>=maxConcurrentUploads) {res.setHeader('Retry-After','1');return deny(req,res,429,'Đã đạt giới hạn 10 lượt tải đồng thời.');}
     activeUploads++;
     const fileId = randomUUID()+'.'+ext;
-    const location = path.join(uploadDir,fileId);
+    const location = path.join(directory,fileId);
     let committed=false;
     try {
       const chunks=[]; let size=0;
@@ -122,11 +138,14 @@ const server = http.createServer(async (req,res) => {
       if (size!==length) throw new Error('LENGTH');
       const buffer=Buffer.concat(chunks,size);
       if (!validContent(buffer,ext)) return json(res,415,{error:'Nội dung tệp không khớp định dạng.'});
-      const metadata=JSON.stringify({owner,scope:encoded,mime,size});
+      const cap=local?randomBytes(32).toString('hex'):null;
+      let name='';
+      try {name=decodeURIComponent(String(req.headers['x-file-name']||'')).replace(/[\x00-\x1f\x7f/\\]/g,'_').slice(0,180);} catch { /* use file id */ }
+      const metadata=JSON.stringify({owner,scope:encoded,mime,size,name,...(cap?{capHash:hash(cap)}:{})});
       await writeFile(location,buffer,{flag:'wx',mode:0o600});
       await writeFile(location+'.json',metadata,{flag:'wx',mode:0o600});
       committed=true;
-      return json(res,201,{path:`/api/media/files/${encoded}/${fileId}`});
+      return json(res,201,{path:`/api/media/${local?'local/':''}files/${encoded}/${fileId}${cap?'?cap='+cap:''}`});
     } catch { return json(res,400,{error:'Tải tệp thất bại.'}); }
     finally {
       if (!committed) {await unlink(location).catch(()=>{});await unlink(location+'.json').catch(()=>{});}
@@ -134,12 +153,16 @@ const server = http.createServer(async (req,res) => {
     }
   }
   if (req.method==='GET' && id) {
-    const location=path.join(uploadDir,id);
+    const location=path.join(directory,id);
     try {
       const meta=JSON.parse(await readFile(location+'.json','utf8'));
       const stats=await stat(location);
+      if (local) {
+        const cap = new URL(req.url,'http://localhost').searchParams.get('cap');
+        if (!cap || !/^[0-9a-f]{64}$/.test(cap) || !safeEqual(hash(cap),meta.capHash)) return json(res,404,{error:'Không tìm thấy tệp hoặc mã truy cập không hợp lệ.'});
+      }
       if (meta.scope!==encoded || types.get(meta.mime)!==id.split('.').at(-1) || meta.size!==stats.size || !stats.isFile()) return json(res,404,{error:'Không tìm thấy tệp.'});
-      res.writeHead(200,{'Content-Type':meta.mime,'Content-Length':stats.size,'X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cache-Control':'private, no-store','Referrer-Policy':'no-referrer','Content-Disposition':/^(image|video)\//.test(meta.mime)?'inline':'attachment'});
+      res.writeHead(200,{'Content-Type':meta.mime,'Content-Length':stats.size,'X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cache-Control':'private, no-store','Referrer-Policy':'no-referrer','Content-Disposition':(/^(image|video)\//.test(meta.mime)?'inline':'attachment') + (typeof meta.name==='string' && meta.name ? "; filename*=UTF-8''"+encodeURIComponent(meta.name).replace(/['()*]/g,c=>'%'+c.charCodeAt(0).toString(16)) : '')});
       const stream=createReadStream(location);stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());stream.pipe(res);
     } catch { return json(res,404,{error:'Không tìm thấy tệp.'}); }
     return;
@@ -147,4 +170,9 @@ const server = http.createServer(async (req,res) => {
   return deny(req,res,405,'Phương thức không được hỗ trợ.');
 });
 server.requestTimeout=30000;server.headersTimeout=10000;server.maxConnections=100;
-server.listen(port,host,()=>console.log(`LyraChat media: http://${host}:${server.address().port} (${enabled?'trusted gateway required':'disabled: missing MEDIA_GATEWAY_SECRET'})`));
+server.on('error',error=>{
+  if(error.code==='EADDRINUSE')console.error(`Media Server: cổng ${host}:${port} đang được sử dụng. Dừng tiến trình AppChat cũ hoặc cấu hình MEDIA_PORT phù hợp.`);
+  else console.error(`Media Server: ${error.message}`);
+  process.exitCode=1;
+});
+server.listen(port,host,()=>{console.log(`LyraChat media: http://${host}:${server.address().port} (${localEnabled?'local sandbox enabled; production auth unchanged':enabled?'trusted gateway required':'disabled: missing MEDIA_GATEWAY_SECRET'})`);if(process.send)process.send({type:'media-ready'});});

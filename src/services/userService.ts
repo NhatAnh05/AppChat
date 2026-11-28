@@ -1,10 +1,11 @@
 import { sessionQueue, currentSessionSignal, assertCurrentSession } from './sessionScope.ts';
-import { ensureLoginConnection } from "./loginService.ts";
+import { ensureCorrelatedConnection, quarantineResponse } from './requestCorrelation.ts';
+import { preferExcelApi } from './apiCompatibility.ts';
 import { websocketService, type WebSocketMessage } from "./websocket.ts";
 import { withApiProbeGate } from "./apiProbeGate.ts";
 
 
-type UserCheckResponse = { status?: unknown };
+type UserCheckResponse = { status?: unknown; user?:unknown; username?:unknown };
 
 // Phản hồi kiểm tra online không có requestId/username: chỉ gửi một yêu cầu mỗi lần.
 const pendingCheck = sessionQueue();
@@ -20,6 +21,7 @@ function serializedCheck<T>(operation: () => Promise<T>): Promise<T> {
 
 function checkResponse(requestEvent: string, responseEvent: string, username: string): Promise<boolean> {
     const session=currentSessionSignal();
+    const socket = websocketService.getSocket();
     return new Promise<boolean>((resolve, reject) => {
         let settled = false;
         const cleanups: Array<() => void> = [];
@@ -31,11 +33,14 @@ function checkResponse(requestEvent: string, responseEvent: string, username: st
             else resolve(result === true);
         };
         const onResponse = (message: WebSocketMessage) => {
+            if (websocketService.getSocket() !== socket || session.aborted) return;
             if (message.status === 'error') {
                 finish(new Error(message.mes || `${responseEvent} thất bại.`));
                 return;
             }
             const data = message.data as UserCheckResponse | undefined;
+            const identity=data?.user??data?.username;
+            if(typeof identity==='string' && identity.trim().toLowerCase()!==username.trim().toLowerCase())return;
             if (typeof data?.status !== 'boolean') {
                 finish(new Error(`Phản hồi ${responseEvent} không hợp lệ.`));
                 return;
@@ -50,13 +55,14 @@ function checkResponse(requestEvent: string, responseEvent: string, username: st
         }));
         cleanups.push(websocketService.onStatus(status => {
             if (status === 'DISCONNECTED' || status === 'ERROR') {
+                quarantineResponse(socket,'probe');
                 finish(new Error('Mất kết nối khi kiểm tra trạng thái người dùng.'));
             }
         }));
         const abort=()=>finish(new Error('Phiên đăng nhập đã thay đổi.'));
         session.addEventListener('abort',abort,{once:true});
         cleanups.push(()=>session.removeEventListener('abort',abort));
-        const timer = setTimeout(() => finish(new Error(`Máy chủ không phản hồi ${responseEvent}.`)), 4000);
+        const timer = setTimeout(() => { quarantineResponse(socket,'probe'); finish(new Error(`Máy chủ không phản hồi ${responseEvent}.`)); }, 4000);
         cleanups.push(() => clearTimeout(timer));
         try { websocketService.send(requestEvent, { user: username }); }
         catch (error) { finish(error instanceof Error ? error : new Error('Không gửi được yêu cầu.')); }
@@ -69,36 +75,28 @@ async function checkUserOnline(username: string): Promise<boolean> {
     }
     return serializedCheck(async () => {
         const session=currentSessionSignal();
-        await ensureLoginConnection(session);
+        await ensureCorrelatedConnection(session,'probe');
         assertCurrentSession(session);
         const socket = websocketService.getSocket();
         if (checkedSocket !== socket) {
             checkedSocket = socket;
-            onlineProtocol = 'alternate';
+            onlineProtocol = preferExcelApi() ? 'documented' : 'alternate';
         }
         if (onlineProtocol === 'unsupported') throw new Error(UNSUPPORTED_MESSAGE);
 
-        // Prefer the event observed to work with the live teacher server.
-        // The documented event remains the fallback for other deployments.
-        if (onlineProtocol === 'alternate') {
+        const candidates = onlineProtocol === 'documented' ? ['documented','alternate'] as const : ['alternate','documented'] as const;
+        for (const candidate of candidates) {
+            assertCurrentSession(session);
             try {
-                return await checkResponse('CHECK_USER_ONLINE', 'CHECK_USER_ONLINE', username);
+                const result = await checkResponse(candidate === 'documented' ? 'CHAT_CHECK_USER_ONLINE' : 'CHECK_USER_ONLINE', 'CHECK_USER_ONLINE', username);
+                onlineProtocol = candidate;
+                return result;
             } catch (error) {
                 if (!(error instanceof Error) || error.message !== 'ACTION_NOT_EXIT') throw error;
-                assertCurrentSession(session);
-                onlineProtocol = 'documented';
             }
         }
-        assertCurrentSession(session);
-        try {
-            return await checkResponse('CHAT_CHECK_USER_ONLINE', 'CHECK_USER_ONLINE', username);
-        } catch (error) {
-            if (error instanceof Error && error.message === 'ACTION_NOT_EXIT') {
-                onlineProtocol = 'unsupported';
-                throw new Error(UNSUPPORTED_MESSAGE, { cause: error });
-            }
-            throw error;
-        }
+        onlineProtocol = 'unsupported';
+        throw new Error(UNSUPPORTED_MESSAGE);
     });
 }
 
@@ -106,7 +104,7 @@ export const userService = {
     checkUserExist(username: string): Promise<boolean> {
         return serializedCheck(async () => {
             const session=currentSessionSignal();
-            await ensureLoginConnection(session);
+            await ensureCorrelatedConnection(session,'probe');
             assertCurrentSession(session);
             return checkResponse('CHAT_CHECK_USER_EXIST', 'CHECK_USER_EXIST', username);
         });

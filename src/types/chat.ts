@@ -20,5 +20,12 @@ export type ChatMessage = {
   content: string;
   createdAt: string;
   orderAt?: string;
+  sendStatus?: 'pending' | 'confirmed' | 'unconfirmed' | 'failed';
   type?: number;
+  /** Server IDs known when the optimistic send was created. */
+  knownServerIds?: string[];
+  /** Display-only link; an unconfirmed request remains unconfirmed. */
+  historyMatchId?: string;
+  /** A provisional realtime row already paired to this server ID. */
+  reconciledLiveId?: string;
 };

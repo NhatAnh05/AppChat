@@ -1,7 +1,7 @@
 import { currentSessionSignal, assertCurrentSession, isCurrentSession } from '../services/sessionScope.ts';
 import { type FormEvent, useState, useEffect, useRef } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { addMessage, removeMessage, replaceMessage, fetchPeopleChatHistory } from "../features/messages/messagesSlice";
+import { addMessage, setMessageStatus, replaceMessage, fetchPeopleChatHistory, fetchRoomChatHistory } from "../features/messages/messagesSlice";
 import { peopleChatService, UnconfirmedSendError } from "../services/peopleChatService";
 import { sendRoomMessage } from "../services/roomChatService.ts";
 import { roomNameFromChatId } from "../services/roomChatProtocol.ts";
@@ -9,6 +9,7 @@ import { uploadMedia } from "../services/mediaUpload";
 import { encodeMediaMessage, type LyraMediaKind } from "../services/mediaMessage";
 import { makeReply, type ReplyReference } from "../services/messageInteractions";
 import type { AppDispatch, RootState } from "../store/store";
+import { hasLinkedServerHistory } from "../services/chatHistoryReconciliation.ts";
 import { readDraft, saveDraft } from "../services/conversationStorage.ts";
 
 type MessageInputProps = {
@@ -28,6 +29,7 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
   useEffect(() => saveDraft(currentUserId, chatId, content), [currentUserId, chatId, content]);
   const [sending, setSending] = useState(false);
   const [inputError, setInputError] = useState('');
+  const [uncertainId, setUncertainId] = useState<string | null>(null);
   const appliedMention = useRef<number | null>(null);
   useEffect(() => {
     if (!mentionRequest || appliedMention.current === mentionRequest.id) return;
@@ -35,8 +37,9 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
     setContent(previous => `${previous}${previous && !/\s$/.test(previous) ? ' ' : ''}${mentionRequest.text}`);
     inputRef.current?.focus();
   }, [mentionRequest]);
-  const sendingGroupRef = useRef(false);
+  const sendBusyRef = useRef(false);
   const [uploading, setUploading] = useState(false);
+  const uploadBusyRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedKind = useRef<LyraMediaKind>("file");
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -95,61 +98,59 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
   const dispatch = useDispatch<AppDispatch>();
   const messages = useSelector((state: RootState) => state.messages.messages);
 
+  const linkedHistory = hasLinkedServerHistory(messages, chatId, uncertainId);
+  const visibleError = linkedHistory ? '' : inputError;
+
   const sendContent = async (value: string, clearInput = false, session = workspaceSession) => {
     assertCurrentSession(session);
     const trimmedContent = value.trim();
     if (!trimmedContent) return;
-    if (isGroup) {
-      if (sendingGroupRef.current) return;
-      sendingGroupRef.current = true;
-      setSending(true);
-      if (clearInput) setContent('');
-      try {
-        const confirmed = await sendRoomMessage(roomNameFromChatId(chatId), trimmedContent);
-        assertCurrentSession(session);
-        dispatch(addMessage({...confirmed, orderAt:new Date().toISOString()}));
-        onMessageSent?.();
-        if (clearInput) onCancelReply?.();
-      } catch (error) {
-        if (clearInput) setContent(previous => previous || trimmedContent);
-        throw error;
-      } finally { sendingGroupRef.current = false; setSending(false); }
-      return;
-    }
+    if (sendBusyRef.current) throw new Error("Đang gửi một tin nhắn khác, vui lòng thử lại.");
+    sendBusyRef.current = true;
+    setSending(true);
     const knownMessageIds = messages.filter(m => m.chatId === chatId).map(m => m.id);
     const sentAt = new Date().toISOString();
-    const optimisticId = crypto.randomUUID();
+    const optimisticId = `local:${crypto.randomUUID()}`;
     if (clearInput) setContent("");
     dispatch(addMessage({
       id: optimisticId, chatId, senderId: currentUserId, senderName: currentUserId,
-      recipientId: chatId, recipientName: chatId, content: trimmedContent,
-      createdAt: sentAt, orderAt: sentAt, type: 0,
+      recipientId: isGroup ? roomNameFromChatId(chatId) : chatId, content: trimmedContent,
+      createdAt: sentAt, orderAt: sentAt, knownServerIds:knownMessageIds.filter(id=>! /^(local|live|ack):/.test(id)), type: isGroup ? 1 : 0, sendStatus:'pending',
     }));
     try {
-      const confirmed = await peopleChatService.sendMessage(currentUserId, chatId, trimmedContent, knownMessageIds);
+      const confirmed = isGroup
+        ? await sendRoomMessage(roomNameFromChatId(chatId), trimmedContent, {knownMessageIds})
+        : await peopleChatService.sendMessage(currentUserId, chatId, trimmedContent, knownMessageIds);
       assertCurrentSession(session);
-      if (!confirmed) throw new Error("Máy chủ chưa xác nhận tin nhắn. Không thể coi đây là gửi thành công.");
-      dispatch(replaceMessage({ id: optimisticId, message: { ...confirmed, orderAt: sentAt } }));
+      if (!confirmed) throw new UnconfirmedSendError("Máy chủ chưa xác nhận tin nhắn.");
+      dispatch(replaceMessage({ id: optimisticId, message: { ...confirmed, chatId, orderAt: sentAt, sendStatus:'confirmed' } }));
       onMessageSent?.();
       if (clearInput) onCancelReply?.();
     } catch (error) {
-      if (isCurrentSession(session)) dispatch(removeMessage({ chatId, id: optimisticId }));
-      if (error instanceof UnconfirmedSendError && isCurrentSession(session)) {
-        // Server history is displayed as history, never as proof of this send.
-        void dispatch(fetchPeopleChatHistory({username:chatId,chatId,page:1,force:true}));
-      } else if (clearInput) setContent(previous => previous || trimmedContent);
+      if (isCurrentSession(session)) {
+        const uncertain = error instanceof UnconfirmedSendError;
+        dispatch(setMessageStatus({chatId,id:optimisticId,status:uncertain?'unconfirmed':'failed'}));
+        if (uncertain) {
+          setUncertainId(optimisticId);
+          const args={username:isGroup?roomNameFromChatId(chatId):chatId,chatId,page:1,force:true};
+          void dispatch(isGroup?fetchRoomChatHistory(args):fetchPeopleChatHistory(args));
+        } else if (clearInput) setContent(previous => previous || content);
+      }
       throw error;
-    }
+    } finally { sendBusyRef.current=false; setSending(false); }
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (uploadBusyRef.current || sendBusyRef.current) return;
+    setUncertainId(null);
     setInputError('');
     try { await sendContent(replyTo ? makeReply(content, replyTo) : content, true); }
     catch (error) { setInputError(error instanceof Error ? error.message : "Không gửi được tin nhắn."); }
   };
 
   const chooseMedia = (kind: LyraMediaKind) => {
+    if (uploadBusyRef.current || sendBusyRef.current) return;
     setMediaMenuOpen(false);
     selectedKind.current = kind;
     if (fileInputRef.current) {
@@ -160,7 +161,10 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
   };
 
   const handleMediaFile = async (file?: File) => {
-    if (!file || uploading || !isCurrentSession(workspaceSession)) return;
+    if (!file || uploadBusyRef.current || sendBusyRef.current || !isCurrentSession(workspaceSession)) return;
+    uploadBusyRef.current = true;
+    setUncertainId(null);
+    setInputError('');
     setUploading(true);
     const session = workspaceSession;
     try {
@@ -169,7 +173,7 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
       await sendContent(encodeMediaMessage(media), false, session);
     } catch (error) {
       setInputError(error instanceof Error ? error.message : "Không gửi được tệp.");
-    } finally { setUploading(false); }
+    } finally { uploadBusyRef.current = false; setUploading(false); }
   };
 
   const kindFromFile = (file: File): LyraMediaKind => file.type === 'image/gif' ? 'gif' :
@@ -190,10 +194,10 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
   };
 
   return (
-      <form className={`message-input-container ${replyTo ? "has-reply" : ""}`} onSubmit={handleSubmit}
+      <form className={`message-input-container ${replyTo || visibleError ? "has-reply" : ""}`} onSubmit={handleSubmit}
         onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={dropMedia}>
-        {inputError && <div className="lyra-composer-error" role="alert">
-          <span>{inputError}</span>
+        {visibleError && <div className="lyra-composer-error" role="alert">
+          <span>{visibleError}</span>
           <button type="button" onClick={() => setInputError('')} aria-label="Đóng thông báo lỗi">×</button>
         </div>}
         {replyTo && <div className="lyra-reply-composer" aria-label="Đang trả lời tin nhắn">
@@ -210,7 +214,7 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
               aria-label="Thêm nội dung đính kèm"
               aria-haspopup="menu"
               aria-expanded={mediaMenuOpen}
-              disabled={uploading}
+              disabled={uploading || sending}
               onClick={() => { setEmojiOpen(false); setMediaMenuOpen(open => !open); }}
           >
             <i className={`bi ${mediaMenuOpen ? "bi-x-lg" : "bi-plus-lg"}`} aria-hidden="true" />
@@ -224,10 +228,10 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
               </div>
           )}
         </div>
-        <button type="button" className="quick-action-button" title="Gửi hình ảnh" aria-label="Gửi hình ảnh" disabled={uploading} onClick={() => chooseMedia("image")}>
+        <button type="button" className="quick-action-button" title="Gửi hình ảnh" aria-label="Gửi hình ảnh" disabled={uploading || sending} onClick={() => chooseMedia("image")}>
           <i className="bi bi-image" aria-hidden="true" />
         </button>
-        <button type="button" className="quick-action-button" title="Đính kèm tệp" aria-label="Đính kèm tệp" disabled={uploading} onClick={() => chooseMedia("file")}>
+        <button type="button" className="quick-action-button" title="Đính kèm tệp" aria-label="Đính kèm tệp" disabled={uploading || sending} onClick={() => chooseMedia("file")}>
           <i className="bi bi-paperclip" aria-hidden="true" />
         </button>
         <div className="emoji-picker-anchor" ref={emojiPanelRef}>

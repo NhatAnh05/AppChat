@@ -1,6 +1,6 @@
 import { assertCurrentSession, currentSessionSignal } from './sessionScope.ts';
-import type { LyraMedia, LyraMediaKind } from "./mediaMessage";
-import { isSafeMediaUrl } from "./mediaMessage";
+import type { LyraMedia, LyraMediaKind } from "./mediaMessage.ts";
+import { isSafeMediaUrl } from "./mediaMessage.ts";
 
 // Tải file trực tiếp vào máy chủ media đi kèm dự án, không dùng Cloudinary.
 // Trong môi trường phát triển, Vite proxy /api/media đến http://127.0.0.1:8787.
@@ -9,17 +9,31 @@ function mediaEndpoint(user: string, target: string, isGroup: boolean): string {
   const scope = isGroup ? ['room', normalized[1]] : ['people', ...normalized.sort()];
   const bytes = new TextEncoder().encode(JSON.stringify(scope));
   const encoded = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  return `/api/media/files/${encoded}`;
+  const local = import.meta.env.DEV && import.meta.env.VITE_LYRA_LOCAL_MEDIA === '1';
+  return `/api/media/${local ? 'local/' : ''}files/${encoded}`;
+}
+const fileTypes: Record<string,string> = {
+  png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',webp:'image/webp',avif:'image/avif',
+  mp4:'video/mp4',webm:'video/webm',mov:'video/quicktime',pdf:'application/pdf',txt:'text/plain',csv:'text/csv',zip:'application/zip',
+  docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
+export function mediaMime(file: Pick<File,'name'|'type'>): string {
+  if (file.type==='application/x-zip-compressed') return 'application/zip';
+  if (file.type==='application/x-zip') return 'application/zip';
+  return file.type && file.type !== 'application/octet-stream' ? file.type : fileTypes[file.name.split('.').at(-1)?.toLowerCase() || ''] || 'application/octet-stream';
 }
 export const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 export async function uploadMedia(file: File, kind: LyraMediaKind, user: string, target: string, isGroup: boolean, session = currentSessionSignal()): Promise<LyraMedia> {
   assertCurrentSession(session);
   const endpoint = mediaEndpoint(user, target, isGroup);
+  const mime = mediaMime(file);
+  if (!file.size) throw new Error("Tệp rỗng không thể gửi.");
   if (file.size > MAX_FILE_SIZE) throw new Error("Tệp vượt quá 25 MB.");
-  if (kind === "image" && !file.type.startsWith("image/")) throw new Error("Hãy chọn tệp ảnh.");
-  if (kind === "video" && !file.type.startsWith("video/")) throw new Error("Hãy chọn tệp video.");
-  if (kind === "gif" && file.type !== "image/gif") throw new Error("Hãy chọn tệp GIF.");
+  if (kind === "image" && !mime.startsWith("image/")) throw new Error("Hãy chọn tệp ảnh.");
+  if (kind === "video" && !mime.startsWith("video/")) throw new Error("Hãy chọn tệp video.");
+  if (kind === "gif" && mime !== "image/gif") throw new Error("Hãy chọn tệp GIF.");
 
   let response: Response;
   try {
@@ -28,14 +42,14 @@ export async function uploadMedia(file: File, kind: LyraMediaKind, user: string,
       credentials: "same-origin",
       signal: session,
       headers: {
-        "Content-Type": file.type || "application/octet-stream",
+        "Content-Type": mime,
         "X-File-Name": encodeURIComponent(file.name),
       },
       body: file,
     });
   } catch {
     assertCurrentSession(session);
-    throw new Error("Không kết nối được máy chủ lưu tệp. Hãy chạy npm run dev:full.");
+    throw new Error("Không kết nối được máy chủ lưu tệp. Nếu thử trên máy này, chạy npm run dev:full -- --local-media.");
   }
   const body: unknown = await response.json().catch(() => null);
   assertCurrentSession(session);
@@ -43,14 +57,15 @@ export async function uploadMedia(file: File, kind: LyraMediaKind, user: string,
   if (!response.ok || !data.path) {
     if (response.status === 401 || response.status === 403 || response.status === 503) throw new Error(data.error || "Chưa có phiên xác thực media hoặc cổng phân quyền chưa được cấu hình.");
     if (response.status === 404 || response.status === 502) {
-      throw new Error(`Máy chủ lưu tệp không khả dụng (HTTP ${response.status}). Chạy npm run dev:full, kiểm tra http://localhost:5173/api/media/health.`);
+      throw new Error(`Máy chủ lưu tệp không khả dụng (HTTP ${response.status}). Kiểm tra tiến trình media và Vite; thử local bằng npm run dev:full -- --local-media.`);
     }
     throw new Error(data.error || `Tải tệp thất bại (HTTP ${response.status}).`);
   }
 
   // Khi triển khai cho nhiều máy, bắt buộc cấu hình HTTPS công khai (cùng reverse-proxy /api/media).
   const publicBase = (import.meta.env.VITE_MEDIA_PUBLIC_BASE_URL || window.location.origin).replace(/\/$/, "");
-  const url = new URL(data.path, publicBase).toString();
+  const local = endpoint.startsWith("/api/media/local/");
+  const url = new URL(data.path, local ? window.location.origin : publicBase).toString();
   if (new URL(url).origin !== window.location.origin || !data.path.startsWith(`${endpoint}/`)) throw new Error("Media cần cổng xác thực cùng origin.");
   if (!isSafeMediaUrl(url)) throw new Error("Địa chỉ file không an toàn. Máy chủ triển khai phải chạy HTTPS.");
   // Link localhost chỉ hoạt động trên chính máy đang chạy media server.
@@ -58,5 +73,6 @@ export async function uploadMedia(file: File, kind: LyraMediaKind, user: string,
   if (/^https?:\/\/(localhost|127\.0\.0\.1)(?::|\/)/i.test(url) && !import.meta.env.DEV) {
     throw new Error("Không thể gửi tệp bằng địa chỉ localhost khi triển khai. Cấu hình VITE_MEDIA_PUBLIC_BASE_URL trỏ tới máy chủ media HTTPS công khai.");
   }
-  return { kind, url, name: file.name, size: file.size };
+  const displayKind: LyraMediaKind = mime === "image/gif" ? "gif" : kind === "file" && mime.startsWith("image/") ? "image" : kind === "file" && mime.startsWith("video/") ? "video" : kind;
+  return { kind: displayKind, url, name: file.name, size: file.size };
 }
