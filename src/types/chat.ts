@@ -3,10 +3,12 @@ export type Chat = {
   name: string
   avatar: string
   avatarColor: string
+  actionTime?: string
   lastMessage: string
   time: string
   unreadCount?: number
   online?: boolean
+  recentIncomingAt?: number
   kind?: "people" | "group"
 }
 
@@ -20,6 +22,10 @@ export type ChatMessage = {
   content: string;
   createdAt: string;
   orderAt?: string;
+  /** Page provenance for notification baselining; never a delivery receipt. */
+  historyPage?: number;
+  /** Portable backup copies cannot serve as server confirmation. */
+  backupOriginalId?: string;
   sendStatus?: 'pending' | 'confirmed' | 'unconfirmed' | 'failed';
   type?: number;
   /** Server IDs known when the optimistic send was created. */

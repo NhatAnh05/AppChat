@@ -51,6 +51,17 @@ function connect() {
     ws.addEventListener('close', onClose);
   });
 }
+function readFrame(raw) {
+  const outer=JSON.parse(String(raw));
+  if (!outer || typeof outer!=='object') return null;
+  const frame=typeof outer.event==='string'?outer:outer.data;
+  if (!frame || typeof frame.event!=='string') return null;
+  return {...frame,status:frame.status??outer.status};
+}
+function chatPayload(packet) {
+  const data=packet?.data;
+  return data && typeof data==='object' && data.name===undefined && data.to===undefined ? data.data??data : data;
+}
 function waitPacket(ws, predicate, label) {
   let done = false;
   let resolveFn;
@@ -58,9 +69,9 @@ function waitPacket(ws, predicate, label) {
   const timer = setTimeout(() => finish({ ok: false, reason: `Không nhận ${label} trong ${timeoutMs / 1000} giây` }), timeoutMs);
   const onMessage = event => {
     let packet;
-    try { packet = JSON.parse(String(event.data)); } catch { return; }
+    try { packet = readFrame(event.data); } catch { return; }
     if (packet?.status === 'error' && ['AUTH', 'ACTION_NOT_EXIT', label].includes(packet.event)) {
-      finish({ ok: false, reason: `Server từ chối (${packet.event}: ${String(packet.mes || 'error')})` });
+      finish({ ok: false, reason: `Server từ chối (${packet.event}: ${'error'})` });
     } else if (predicate(packet)) {
       finish({ ok: true, packet });
     }
@@ -88,37 +99,47 @@ const sameUser = (one, another) => typeof one === 'string' && one.trim().toLocal
 
 async function oneWay(sender, receiver, senderSocket, receiverSocket) {
   const marker = `CHAT_DIAGNOSTIC_${randomUUID().slice(0, 10)}`;
-  let seenOnReceiver = 0;
-  let seenOnSender = 0;
-  const countReceiver = event => {
-    try { if (JSON.parse(String(event.data))?.event === 'SEND_CHAT') seenOnReceiver++; } catch {}
+  const started = performance.now();
+  let senderFrames=0, incomplete=0, receivedAt, acknowledgedAt;
+  const matches = packet => {
+    const row=chatPayload(packet);
+    return packet?.event==='SEND_CHAT' && packet.status==='success' && [0,'0','people'].includes(row?.type) &&
+      row?.mes===marker && sameUser(row?.name,sender.user) && sameUser(row?.to,receiver.user);
   };
   const countSender = event => {
-    try { if (JSON.parse(String(event.data))?.event === 'SEND_CHAT') seenOnSender++; } catch {}
+    try {
+      const packet=readFrame(event.data);
+      if(packet?.event==='SEND_CHAT') {
+        senderFrames++;
+        if (!matches(packet)) incomplete++;
+      }
+    } catch { /* malformed frame */ }
   };
-  receiverSocket.addEventListener('message', countReceiver);
   senderSocket.addEventListener('message', countSender);
   try {
-    const incoming = waitPacket(receiverSocket,
-      packet => packet?.event === 'SEND_CHAT' && packet?.data?.mes === marker
-        && sameUser(packet?.data?.name, sender.user) && sameUser(packet?.data?.to, receiver.user),
-      'SEND_CHAT ở người nhận');
-    send(senderSocket, 'SEND_CHAT', { type: 'people', to: receiver.user, mes: marker });
-    const result = await incoming;
-    const summary = result.ok ? 'PASS: Người nhận có frame SEND_CHAT' : `FAIL: ${result.reason}`;
-    console.log(`${sender.label} → ${receiver.label}: ${summary}`);
-    console.log(`  Số frame SEND_CHAT quan sát: người gửi=${seenOnSender}, người nhận=${seenOnReceiver}`);
-    if (!result.ok && seenOnReceiver > 0) {
-      console.log('  Có frame SEND_CHAT khác nhưng không khớp người gửi/người nhận/nội dung thử nghiệm: cần kiểm tra định dạng server.');
-    }
-    if (!result.ok && seenOnReceiver === 0) {
-      console.log('  Server chưa chuyển frame SEND_CHAT phù hợp đến socket người nhận trong thời gian kiểm tra.');
-    }
+    const incoming=waitPacket(receiverSocket,packet=>{if(!matches(packet))return false;receivedAt=performance.now()-started;return true;},'SEND_CHAT receiver');
+    const acknowledgement=waitPacket(senderSocket,packet=>{if(!matches(packet))return false;acknowledgedAt=performance.now()-started;return true;},'SEND_CHAT sender');
+    send(senderSocket,'SEND_CHAT',{type:'people',to:receiver.user,mes:marker});
+    const [result,ack]=await Promise.all([incoming,acknowledgement]);
+    console.log(`${sender.label} → ${receiver.label}: receiver=${result.ok?'PASS '+Math.round(receivedAt)+'ms':'NO_MATCH'}; sender_ACK=${ack.ok?'MATCH '+Math.round(acknowledgedAt)+'ms':'NO_MATCH in 15s'}`);
+    console.log(`  SEND_CHAT frames at sender=${senderFrames}; not matching test tuple=${incomplete}`);
     return result.ok;
-  } finally {
-    receiverSocket.removeEventListener('message', countReceiver);
-    senderSocket.removeEventListener('message', countSender);
-  }
+  } finally {senderSocket.removeEventListener('message',countSender);}
+}
+
+async function checkPresence(ws, peer, label, requestEvent) {
+  const pending=waitPacket(ws,packet=>{
+    if(!['CHECK_USER_ONLINE','CHAT_CHECK_USER_ONLINE'].includes(packet?.event)||packet.status==='error')return false;
+    const outer=packet.data;const nested=outer?.data;
+    for(const identity of [outer?.user,outer?.username,nested?.user,nested?.username])if(identity!==undefined&&!sameUser(identity,peer.user))return false;
+    return typeof outer?.status==='boolean'||typeof nested?.status==='boolean';
+  },'CHECK_USER_ONLINE');
+  send(ws,requestEvent,{user:peer.user});
+  const result=await pending;
+  const outer=result.packet?.data;const nested=outer?.data;
+  const conflict=typeof outer?.status==='boolean'&&typeof nested?.status==='boolean'&&outer.status!==nested.status;
+  const value=typeof outer?.status==='boolean'?outer.status:nested?.status;
+  console.log(`${label}: ${requestEvent} => ${result.ok&&!conflict?String(value):'UNKNOWN'}`);
 }
 
 let wsA;
@@ -133,6 +154,11 @@ try {
   console.log('PASS: Cả hai tài khoản LOGIN thành công.');
   await Promise.all([request(wsA, 'GET_USER_LIST', {}), request(wsB, 'GET_USER_LIST', {})]);
   console.log('PASS: Cả hai socket xử lý GET_USER_LIST thành công.');
+  if(process.env.CHAT_TEST_ONLINE_EVENT) {
+    const probe=process.env.CHAT_TEST_ONLINE_EVENT;
+    if(!['CHECK_USER_ONLINE','CHAT_CHECK_USER_ONLINE'].includes(probe))throw new Error('CHAT_TEST_ONLINE_EVENT không hợp lệ.');
+    await Promise.all([checkPresence(wsA,accounts[1],'A kiểm tra B',probe),checkPresence(wsB,accounts[0],'B kiểm tra A',probe)]);
+  }
   const resultAB = await oneWay(accounts[0], accounts[1], wsA, wsB);
   const resultBA = await oneWay(accounts[1], accounts[0], wsB, wsA);
   console.log(resultAB && resultBA

@@ -1,3 +1,4 @@
+import type { RoomHistoryDiagnostic } from './roomChatProtocol.ts';
 /** Shared transport: REGISTER before login; every other app API uses the authenticated socket. */
 export interface WebSocketMessage<T = unknown> {
     event: string;
@@ -5,7 +6,7 @@ export interface WebSocketMessage<T = unknown> {
     data: T;
     mes?: string;
 }
-export type ApiLogEntry = { at: string; direction: 'GỬI' | 'NHẬN' | 'TRẠNG THÁI'; event: string; status?: string };
+export type ApiLogEntry = { at: string; direction: 'GỬI' | 'NHẬN' | 'TRẠNG THÁI'; event: string; status?: string; detail?: string };
 export type WebSocketState = 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
 type MessageCallback = (message: WebSocketMessage) => void;
 type LogCallback = (entry: ApiLogEntry) => void;
@@ -111,6 +112,10 @@ export class WebSocketService {
         if (!callbacks) { callbacks = new Set(); this.messages.set(event, callbacks); }
         callbacks.add(callback);
         return () => { callbacks?.delete(callback); if (!callbacks?.size) this.messages.delete(event); };
+    }
+    /** Fixed diagnostic codes only. Never log usernames, message contents, credentials or URLs. */
+    diagnostic(event: 'SEND_CHAT' | 'CHECK_USER_ONLINE' | 'CHECK_USER_EXIST' | 'GET_ROOM_CHAT_MES', detail: 'ack-timeout' | 'ack-incomplete' | 'ack-replay' | 'ack-matched' | 'presence-true' | 'presence-false' | 'probe-invalid' | 'probe-other-user' | 'probe-timeout' | RoomHistoryDiagnostic): void {
+        this.log({ at: new Date().toLocaleTimeString('vi-VN'), direction:'TRẠNG THÁI', event, detail });
     }
     onLog(callback: LogCallback): () => void { this.logs.add(callback); return () => { this.logs.delete(callback); }; }
     onStatus(callback: StatusCallback): () => void { this.statuses.add(callback); return () => { this.statuses.delete(callback); }; }

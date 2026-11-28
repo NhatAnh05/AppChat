@@ -3,7 +3,7 @@ import type { Message } from '../data/previewContent';
 import { messagePreview, parseMediaMessage, type MediaKind } from './mediaMessages.ts';
 import { senderLabel } from './messageProductivity.ts';
 
-export type LibraryFilter = 'all' | 'image' | 'video' | 'file' | 'sticker';
+export type LibraryFilter = 'all' | 'image' | 'video' | 'file' | 'sticker' | 'audio';
 export type LibraryEntry = {
   messageId: string;
   index: number;
@@ -25,7 +25,7 @@ export function collectMediaLibrary(messages: Message[]): LibraryEntry[] {
         index,
         kind: item.kind,
         url: item.url,
-        name: item.name || ({image:'Ảnh',gif:'GIF',video:'Video',file:'Tệp đính kèm',sticker:'Sticker'}[item.kind]),
+        name: item.name || ({image:'Ảnh',gif:'GIF',video:'Video',file:'Tệp đính kèm',sticker:'Sticker',audio:'Ghi âm'}[item.kind]),
         caption: media.caption || '',
       });
     });
@@ -52,7 +52,8 @@ export function formatSelectedCopy(chatName: string, messages: Message[]): strin
 /** An attachment is forwarded unchanged so the recipient can open it in LyraChat. */
 export function prepareForwardMessage(message: Message): string {
   const value = message.text || '';
-  if (parseMediaMessage(value)) return value;
+  const media=parseMediaMessage(value);
+  if(media)return media.items.some(item=>item.url&&new URL(item.url).pathname.startsWith('/api/media/'))?'':value;
   if (value.startsWith('[[LYRA_MEDIA_V1]]')) return ''; // refuse malformed media envelope
   const plain = value.trim() || (message.fileName ? `[Tệp: ${message.fileName}]` : '');
   if (!plain) return '';

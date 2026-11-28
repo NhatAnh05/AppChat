@@ -1,4 +1,6 @@
 import type { ChatMessage } from '../types/chat';
+import { parseChatTime } from '../utils/chatTime.ts';
+import { parseInteraction } from './messageInteractions.ts';
 
 export type UnreadLedger = {
   version: 1;
@@ -6,11 +8,13 @@ export type UnreadLedger = {
   initializedChats: string[];
   known: string[];
   unread: Record<string, string[]>;
+  newestByChat?: Record<string, number>;
 };
 
 const MAX_KNOWN = 12000;
 const MAX_PER_CHAT = 300;
 export const emptyUnreadLedger = (): UnreadLedger => ({version: 1, initialized: false, initializedChats: [], known: [], unread: {}});
+const eligible=(message:ChatMessage)=>!message.id.startsWith('unverified:backup:')&&parseInteraction(message.content)?.kind!=='reaction'&&Boolean(message.content.trim());
 const normalize = (value: string): string => value.trim().toLocaleLowerCase();
 const hash = (text: string): string => {
   let value = 2166136261;
@@ -48,7 +52,9 @@ export function readUnreadLedger(account: string, storage?: Pick<Storage, 'getIt
     for (const [chat, keys] of Object.entries(state.unread)) {
       if (Array.isArray(keys)) unread[normalize(chat)] = keys.filter((key): key is string => typeof key === 'string').slice(-MAX_PER_CHAT);
     }
-    return {version: 1, initialized: state.initialized, initializedChats, known, unread};
+    const newestByChat:Record<string,number>=Object.create(null);
+    for(const [chat,time] of Object.entries(state.newestByChat??{}))if(typeof time==='number'&&Number.isFinite(time))newestByChat[normalize(chat)]=time;
+    return {version: 1, initialized: state.initialized, initializedChats, known, unread,newestByChat};
   } catch { return emptyUnreadLedger(); }
 }
 
@@ -82,16 +88,20 @@ export function markChatRead(ledger: UnreadLedger, chatId: string): UnreadLedger
 
 export function recordIncomingMessage(ledger: UnreadLedger, message: ChatMessage, account: string,
                                       activeChatId: string | null, isVisible: boolean): UnreadLedger {
-  if (normalize(message.senderId) === normalize(account)) return ledger;
+  if (!eligible(message)||normalize(message.senderId) === normalize(account)) return ledger;
   const keys = messageKeys(message);
   const known = new Set(ledger.known);
-  if (keys.some(key => known.has(key))) return ledger;
+  const identity=keys.at(-1)!;
+  if (known.has(identity)) return ledger;
   keys.forEach(key => known.add(key));
   const chat = normalize(message.chatId);
   const isRead = isVisible && chat === normalize(activeChatId ?? '');
   const unread = {...ledger.unread};
-  if (!isRead) unread[chat] = [...(unread[chat] ?? []), keys[0]].slice(-MAX_PER_CHAT);
-  return {...ledger, known: [...known].slice(-MAX_KNOWN), unread};
+  if (!isRead) unread[chat] = [...(unread[chat] ?? []), identity].slice(-MAX_PER_CHAT);
+  const timestamp=parseChatTime(message.createdAt);
+  const newestByChat={...ledger.newestByChat};
+  if(Number.isFinite(timestamp))newestByChat[chat]=Math.max(newestByChat[chat]??0,timestamp);
+  return {...ledger, known: [...known].slice(-MAX_KNOWN), unread,newestByChat};
 }
 
 export function reconcileUnreadMessages(ledger: UnreadLedger, messages: readonly ChatMessage[], account: string,
@@ -102,25 +112,32 @@ export function reconcileUnreadMessages(ledger: UnreadLedger, messages: readonly
   const allChats = new Set([...ledger.initializedChats, ...loadedChatIds.map(normalize)]);
   const known = new Set(ledger.known);
   const unread: Record<string, string[]> = {...ledger.unread};
+  const newestByChat={...ledger.newestByChat};
   let changed = !ledger.initialized || allChats.size !== previousChats.size;
   for (const message of messages) {
+    if(!eligible(message))continue;
+    const chat = normalize(message.chatId);
+    const timestamp=parseChatTime(message.createdAt);
+    if(Number.isFinite(timestamp)&&timestamp>(newestByChat[chat]??0)){newestByChat[chat]=timestamp;changed=true;}
     const keys = messageKeys(message);
-    if (keys.some(key => known.has(key))) {
+    const identity=keys.at(-1)!;
+    const alias=message.reconciledLiveId?`${chat}|id|${message.reconciledLiveId}`:null;
+    if (known.has(identity)||(alias&&known.has(alias))) {
       for (const key of keys) if (!known.has(key)) {known.add(key); changed = true;}
       continue;
     }
     for (const key of keys) known.add(key);
     changed = true;
-    const chat = normalize(message.chatId);
+    if ((message.historyPage??1)>1 || !Number.isFinite(timestamp) || timestamp<(ledger.newestByChat?.[chat]??0))continue;
     if (normalize(message.senderId) === normalize(account)) continue;
     if (!ledger.initialized || !previousChats.has(chat)) continue;
     if (isVisible && chat === normalize(activeChatId ?? '')) continue;
-    unread[chat] = [...(unread[chat] ?? []), keys[0]].slice(-MAX_PER_CHAT);
+    unread[chat] = [...(unread[chat] ?? []), identity].slice(-MAX_PER_CHAT);
   }
   if (isVisible && activeChatId) {
     const chat = normalize(activeChatId);
     if (unread[chat]?.length) { delete unread[chat]; changed = true; }
   }
   if (!changed) return ledger;
-  return {version: 1, initialized: true, initializedChats: [...allChats], known: [...known].slice(-MAX_KNOWN), unread};
+  return {version: 1, initialized: true, initializedChats: [...allChats], known: [...known].slice(-MAX_KNOWN), unread,newestByChat};
 }

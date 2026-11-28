@@ -65,3 +65,14 @@ export function resolveRealtimeConversationId(
 export function belongsToConversation(message: ServerChatMessage, currentUser: string, conversationId: string): boolean {
   return resolveRealtimeConversationId(message, currentUser, [conversationId]) === conversationId;
 }
+
+/** ACK requires an explicit chat type and the full sender/target/content tuple.
+ * Accept the same one-layer adapter envelope as realtime messages. */
+export function parseSendAcknowledgement(input: unknown): ServerChatMessage | null {
+  const outer = record(input);
+  if (!outer) return null;
+  const row = outer.name === undefined && outer.to === undefined ? record(outer.data) ?? outer : outer;
+  if (![0, '0', 'people', 1, '1', 'room'].includes(row.type as string | number)) return null;
+  if (row.id !== undefined && !(typeof row.id === 'string' && row.id.trim() || typeof row.id === 'number' && Number.isSafeInteger(row.id))) return null;
+  return parseServerChatMessage(row);
+}

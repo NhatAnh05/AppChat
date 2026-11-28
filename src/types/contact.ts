@@ -6,4 +6,5 @@ export type ContactEntry = {
   detail?: string;
   online?: boolean;
   onlineCheckedAt?: number;
+  recentIncomingAt?: number;
 };

@@ -1,9 +1,9 @@
 /** Giai đoạn 2: các tiện ích hiển thị trong LyraChat, không yêu cầu event API mới. */
 import type { ChatMessage } from '../types/chat.ts';
 import { parseInteraction, visibleMessageContent } from './messageInteractions.ts';
-import { parseMediaMessage, type LyraMedia } from './mediaMessage.ts';
+import { parseMediaCollection, mediaMessagePreview, type LyraMedia } from './mediaMessage.ts';
 
-export type WorkspaceMedia = LyraMedia & { messageId: string; sender: string };
+export type WorkspaceMedia = LyraMedia & { messageId: string; sender: string; index: number };
 
 export function humanText(message: ChatMessage): string {
   return visibleMessageContent(message.content);
@@ -26,7 +26,7 @@ export function findLoadedMessages(messages: ChatMessage[], query: string): Chat
   const needle = normalizeSearch(query);
   if (!needle) return messages.filter(isUserMessage);
   return messages.filter(item => isUserMessage(item) &&
-    normalizeSearch(`${humanText(item)} ${item.senderName ?? item.senderId}`).includes(needle));
+    normalizeSearch(`${mediaMessagePreview(humanText(item))} ${parseMediaCollection(humanText(item))?.items.map(m=>m.name ?? m.sticker ?? "").join(" ") ?? ""} ${item.senderName ?? item.senderId}`).includes(needle));
 }
 
 /** Bookmark dựa trên định danh ổn định; không lưu nội dung tin nhắn vào localStorage. */
@@ -43,18 +43,19 @@ export function bookmarkId(message: ChatMessage): string {
 
 export function collectLoadedMedia(messages: ChatMessage[]): WorkspaceMedia[] {
   return messages.filter(isUserMessage).flatMap(message => {
-    const media = parseMediaMessage(humanText(message));
-    return media ? [{...media, messageId:message.id, sender:message.senderName ?? message.senderId}] : [];
+    const media = parseMediaCollection(humanText(message));
+    return media?.items.flatMap((item,index) => item.kind !== 'sticker' && item.url ? [{kind:item.kind,url:item.url,name:item.name || 'Tệp đính kèm',size:item.size,messageId:message.id,sender:message.senderName ?? message.senderId,index}] : []) ?? [];
   });
 }
 
 /** Chuyển tiếp bằng SEND_CHAT thường; không bịa event FORWARD_CHAT không có trong API. */
 export function forwardContent(message: ChatMessage): string | null {
-  if (!isUserMessage(message)) return null;
+  if (!isUserMessage(message)||message.id.startsWith('unverified:backup:')) return null;
   const original = humanText(message).trim();
   if (!original) return null;
-  const media = parseMediaMessage(original);
-  if (media) return media.url; // giữ URL HTTPS để bên nhận mở được tệp
+  const media = parseMediaCollection(original);
+  // Scoped storage links cannot be forwarded to another conversation without a new permission grant.
+  if (media) return media.items.some(item => item.url && new URL(item.url).pathname.startsWith('/api/media/')) ? null : original.length <= 9500 ? original : null;
   if (original.startsWith('[[LYRA_MEDIA_V1]]') || original.startsWith('LYRA_INTERACT_V1:')) return null;
   const value = `↪ Chuyển tiếp:\n${original}`;
   return value.length <= 9500 ? value : null;
@@ -64,8 +65,8 @@ export function copySelectedMessages(messages: ChatMessage[], currentUserId: str
   return messages.filter(isUserMessage).map(message => {
     const sender = message.senderId.toLowerCase() === currentUserId.toLowerCase()
       ? 'Bạn' : message.senderName ?? message.senderId;
-    const content = parseMediaMessage(humanText(message));
-    const description = content ? `[${content.kind.toUpperCase()}: ${content.name}] ${content.url}` : humanText(message);
+    const content = parseMediaCollection(humanText(message));
+    const description = content ? content.items.map(item => `[${item.kind.toUpperCase()}: ${item.name ?? item.sticker ?? 'Tệp đính kèm'}]${item.url && !new URL(item.url).pathname.startsWith('/api/media/') ? ` ${item.url}` : ''}`).join(' · ') + (content.caption ? ` — ${content.caption}` : '') : humanText(message);
     return `[${message.createdAt}] ${sender}: ${description}`;
   }).join('\n');
 }

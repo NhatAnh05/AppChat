@@ -5,7 +5,18 @@ import { websocketService, type WebSocketMessage } from "./websocket.ts";
 import { withApiProbeGate } from "./apiProbeGate.ts";
 
 
-type UserCheckResponse = { status?: unknown; user?:unknown; username?:unknown };
+type UserCheckResponse = { status?: unknown; user?:unknown; username?:unknown; data?:unknown };
+export function parseUserCheck(data: unknown, username: string): {kind:'other'|'invalid'} | {kind:'value';value:boolean} {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return {kind:'invalid'};
+    const outer=data as UserCheckResponse;
+    const nested=outer.data && typeof outer.data==='object' && !Array.isArray(outer.data) ? outer.data as UserCheckResponse : undefined;
+    for (const identity of [outer.user,outer.username,nested?.user,nested?.username]) {
+        if (identity!==undefined && (typeof identity!=='string'||identity.trim().toLowerCase()!==username.trim().toLowerCase())) return {kind:'other'};
+    }
+    if (typeof outer.status==='boolean' && typeof nested?.status==='boolean' && outer.status!==nested.status) return {kind:'invalid'};
+    const value=typeof outer.status==='boolean'?outer.status:nested?.status;
+    return typeof value==='boolean'?{kind:'value',value}:{kind:'invalid'};
+}
 
 // Phản hồi kiểm tra online không có requestId/username: chỉ gửi một yêu cầu mỗi lần.
 const pendingCheck = sessionQueue();
@@ -34,18 +45,21 @@ function checkResponse(requestEvent: string, responseEvent: string, username: st
         };
         const onResponse = (message: WebSocketMessage) => {
             if (websocketService.getSocket() !== socket || session.aborted) return;
+            const result = parseUserCheck(message.data,username);
+            const diagnosticEvent = responseEvent==='CHECK_USER_ONLINE'?'CHECK_USER_ONLINE':'CHECK_USER_EXIST';
+            if (result.kind==='other') { websocketService.diagnostic(diagnosticEvent,'probe-other-user'); return; }
             if (message.status === 'error') {
                 finish(new Error(message.mes || `${responseEvent} thất bại.`));
                 return;
             }
-            const data = message.data as UserCheckResponse | undefined;
-            const identity=data?.user??data?.username;
-            if(typeof identity==='string' && identity.trim().toLowerCase()!==username.trim().toLowerCase())return;
-            if (typeof data?.status !== 'boolean') {
+            if (result.kind !== 'value') {
+                websocketService.diagnostic(diagnosticEvent,'probe-invalid');
+                quarantineResponse(socket,'probe');
                 finish(new Error(`Phản hồi ${responseEvent} không hợp lệ.`));
                 return;
             }
-            finish(undefined, data.status);
+            if (diagnosticEvent==='CHECK_USER_ONLINE') websocketService.diagnostic(diagnosticEvent,result.value?'presence-true':'presence-false');
+            finish(undefined, result.value);
         };
         cleanups.push(websocketService.on(responseEvent, onResponse));
         if (requestEvent !== responseEvent) cleanups.push(websocketService.on(requestEvent, onResponse));
@@ -62,7 +76,7 @@ function checkResponse(requestEvent: string, responseEvent: string, username: st
         const abort=()=>finish(new Error('Phiên đăng nhập đã thay đổi.'));
         session.addEventListener('abort',abort,{once:true});
         cleanups.push(()=>session.removeEventListener('abort',abort));
-        const timer = setTimeout(() => { quarantineResponse(socket,'probe'); finish(new Error(`Máy chủ không phản hồi ${responseEvent}.`)); }, 4000);
+        const timer = setTimeout(() => { quarantineResponse(socket,'probe'); websocketService.diagnostic(responseEvent==='CHECK_USER_ONLINE'?'CHECK_USER_ONLINE':'CHECK_USER_EXIST','probe-timeout'); finish(new Error(`Máy chủ không phản hồi ${responseEvent}.`)); }, 4000);
         cleanups.push(() => clearTimeout(timer));
         try { websocketService.send(requestEvent, { user: username }); }
         catch (error) { finish(error instanceof Error ? error : new Error('Không gửi được yêu cầu.')); }

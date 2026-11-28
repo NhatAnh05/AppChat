@@ -5,6 +5,7 @@ import { ensureLoginConnection, getAuthenticatedUsername } from "./loginService.
 import { encodeChatContent, decodeChatContent } from "./chatContentCodec.ts";
 import { requestChatHistory } from "./chatHistoryTransport.ts";
 import { enqueueChatSend } from "./chatSendQueue.ts";
+import { parseSendAcknowledgement, sameChatUser } from "./serverMessage.ts";
 
 type ApiPeopleMessage = {
   id: string | number;
@@ -27,6 +28,9 @@ type ApiSentPeopleMessage = {
 
 const acknowledgedIds = new WeakMap<WebSocket, Set<string>>();
 const RESPONSE_TIMEOUT_MS = 10_000;
+// Excel #14 describes forwarding to the recipient, not a sender ACK.
+// A bounded wait avoids blocking all authenticated operations for ten seconds.
+const PERSONAL_ACK_TIMEOUT_MS = 4_000;
 
 class SendConfirmationMissingError extends Error {}
 import { ensureCorrelatedConnection, quarantineResponse, UnconfirmedSendError } from './requestCorrelation.ts';
@@ -84,9 +88,10 @@ function requestSendMessage(sender: string, recipient: string, content: string, 
     let settled = false;
     const timeout = setTimeout(() => {
       quarantineResponse(socket,'send');
+      websocketService.diagnostic('SEND_CHAT', 'ack-timeout');
       cleanup();
       reject(new SendConfirmationMissingError("Chưa nhận được xác nhận từ máy chủ."));
-    }, RESPONSE_TIMEOUT_MS);
+    }, PERSONAL_ACK_TIMEOUT_MS);
 
     const cleanup = () => {
       if (settled) return;
@@ -101,28 +106,33 @@ function requestSendMessage(sender: string, recipient: string, content: string, 
     session.addEventListener("abort", onAbort, {once:true});
     unsubscribeMessage = websocketService.on("SEND_CHAT", (message) => {
       if (session.aborted || websocketService.getSocket() !== socket) { onAbort(); return; }
-      const data = message.data as Partial<ApiSentPeopleMessage> | null;
-      // SEND_CHAT dùng chung cho chat nhóm và chat cá nhân. Không xác nhận từ
-      // một broadcast nhóm, tin của người khác hoặc một ACK success chung chung.
-      if (data?.type === 1 || data?.type === '1' || data?.type === 'room') return;
+      const data = parseSendAcknowledgement(message.data);
+      if (data?.type === 1) return;
       if (message.status === "error") {
+        // A targeted error for another conversation is not our response.
+        const outer = message.data as {type?:unknown;to?:unknown;name?:unknown;data?:{type?:unknown;to?:unknown;name?:unknown}} | null;
+        const row = outer?.data ?? outer;
+        if (row?.type === 1 || row?.type === '1' || row?.type === 'room' ||
+          typeof row?.to === 'string' && !sameChatUser(row.to,recipient) ||
+          typeof row?.name === 'string' && !sameChatUser(row.name,sender)) return;
         cleanup();
         reject(new Error(message.mes ?? "Gửi tin nhắn thất bại."));
         return;
       }
-      if (message.status !== "success") return;
-      if (!data || typeof data.to !== 'string' || typeof data.mes !== 'string') return;
-      if (data.to.trim().toLowerCase() !== recipient.trim().toLowerCase()) return;
-      if (data.mes !== content) return;
-      if (typeof data.name !== 'string' || data.name.trim().toLowerCase() !== sender.trim().toLowerCase()) return;
+      if (message.status !== "success" || !data) {
+        websocketService.diagnostic('SEND_CHAT', 'ack-incomplete');
+        return;
+      }
+      if (!sameChatUser(data.to,recipient) || !sameChatUser(data.name,sender) || data.mes !== content) return;
       if (data.id !== undefined && socket) {
         const id = String(data.id);
         const seen = acknowledgedIds.get(socket) ?? new Set<string>();
-        if (knownIds.has(id) || seen.has(id)) return;
+        if (knownIds.has(id) || seen.has(id)) { websocketService.diagnostic('SEND_CHAT', 'ack-replay'); return; }
         seen.add(id); acknowledgedIds.set(socket, seen);
       }
+      websocketService.diagnostic('SEND_CHAT', 'ack-matched');
       cleanup();
-      resolve(message);
+      resolve({...message,data});
     });
 
     unsubscribeStatus = websocketService.onStatus((status) => {
@@ -173,6 +183,7 @@ export const peopleChatService = {
   ): Promise<ChatMessage | null> {
     const trimmedContent = content.trim();
     const transportContent = encodeChatContent(trimmedContent);
+    if(transportContent.length>10000)throw new Error("Nội dung vượt giới hạn API 10000 ký tự sau mã hóa.");
     const orderAt = new Date().toISOString();
     if (!trimmedContent) throw new Error("Nhập nội dung tin nhắn.");
     if (!sender.trim() || !recipient.trim()) throw new Error("Thiếu người gửi hoặc người nhận.");

@@ -79,8 +79,8 @@ test('Incoming websocket event before initial history is not lost', () => {
 });
 test('No false increment when WebSocket ID becomes a server history ID', () => {
   const initial = baseline([]);
-  const live = recordIncomingMessage(initial, incoming('temporary'), 'Me', null, true);
-  const history = reconcileUnreadMessages(live, [incoming('server-234')], 'Me', ['Alice'], true, null, true);
+  const live = recordIncomingMessage(initial, incoming('live:temporary'), 'Me', null, true);
+  const history = reconcileUnreadMessages(live, [{...incoming('server-234'),reconciledLiveId:'live:temporary'}], 'Me', ['Alice'], true, null, true);
   assert.equal(getTotalUnread(history), 1);
 });
 test('Bad or unavailable localStorage does not crash the app', () => {

@@ -9,8 +9,10 @@ function formatSize(size:number|undefined):string {
   return `${(size/(1024*1024)).toFixed(1)} MB`;
 }
 /** One media item has its own loading/error state. Remount on URL change. */
-export default function MediaAttachment({media}:{media:LyraMedia}) {
+export default function MediaAttachment({media,thumbnail=false,onOpen}:{media:LyraMedia;thumbnail?:boolean;onOpen?:()=>void}) {
   const [failed,setFailed]=useState(false);
+  const [visualWidth,setVisualWidth]=useState(320);
+  const fitVisual=(width:number,height:number)=>{if(width>0&&height>0)setVisualWidth(Math.min(320,width,300*width/height));};
   const [attempt,setAttempt]=useState(0);
   const [downloadBusy,setDownloadBusy]=useState(false);
   const [downloadError,setDownloadError]=useState('');
@@ -33,13 +35,14 @@ export default function MediaAttachment({media}:{media:LyraMedia}) {
   const retry=()=>{setFailed(false);setAttempt(v=>v+1);};
   if(failed)return <div className="lyra-media-fallback" role="status">
     <i className="bi bi-exclamation-circle" aria-hidden="true" />
-    <span>Không tải được {media.kind==='video'?'video':'ảnh'}. Tệp có thể đã mất hoặc bạn chưa có quyền truy cập.</span>
+    <span>Không tải được {media.kind==='video'?'video':media.kind==='audio'?'ghi âm':'ảnh'}. Tệp có thể đã mất hoặc bạn chưa có quyền truy cập.</span>
     <button type="button" onClick={retry}>Thử lại</button>
     <a href={url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Mở tệp</a>
   </div>;
-  return <div className="chat-media">
-    {(media.kind==='image'||media.kind==='gif')&&<a className="lyra-visual-media" href={url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer"><img key={attempt} src={url} alt={media.name} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={()=>setFailed(true)} /></a>}
-    {media.kind==='video'&&<video className="lyra-visual-media" key={attempt} src={url} controls playsInline preload="metadata" onError={()=>setFailed(true)} />}
+  return <div className="chat-media" style={!thumbnail&&['image','gif','video'].includes(media.kind)?{width:visualWidth,maxWidth:'100%'}:undefined}>
+    {(media.kind==='image'||media.kind==='gif')&&<button type="button" className="lyra-visual-media lyra-viewer-trigger" onClick={onOpen} aria-label={`Xem ${media.name}`}><img key={attempt} src={url} alt={media.name} loading="lazy" decoding="async" referrerPolicy="no-referrer" onLoad={e=>fitVisual(e.currentTarget.naturalWidth,e.currentTarget.naturalHeight)} onError={()=>setFailed(true)} /></button>}
+    {media.kind==='video'&&<video className="lyra-visual-media" key={attempt} src={url} controls playsInline preload="metadata" onLoadedMetadata={e=>fitVisual(e.currentTarget.videoWidth,e.currentTarget.videoHeight)} onError={()=>setFailed(true)} />}
+    {media.kind==='audio'&&<><audio key={attempt} src={url} controls preload="metadata" onError={()=>setFailed(true)} aria-label={media.name}/>{ownMedia&&<button type="button" className="lyra-file-download" disabled={downloadBusy} onClick={()=>void download()}>{downloadBusy?'Đang tải…':'Tải ghi âm'}</button>}{downloadError&&<p role="alert" className="lyra-file-error">{downloadError}</p>}</>}
     {media.kind==='file'&&ownMedia&&<><button type="button" className="lyra-file-card lyra-file-download" disabled={downloadBusy} onClick={()=>void download()}>
       <i className="bi bi-file-earmark-arrow-down" aria-hidden="true" />
       <span><strong>{media.name}</strong><small>{downloadBusy?'Đang tải…':formatSize(media.size)||'Tải tệp đính kèm'}</small></span>

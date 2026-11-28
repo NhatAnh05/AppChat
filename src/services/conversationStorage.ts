@@ -1,9 +1,11 @@
 /** Local-only preferences and drafts. The server does not provide these operations. */
+import { parseInteraction } from './messageInteractions.ts';
 import type { Conversation } from '../data/previewContent';
 
 export type ConversationPreference = Pick<Conversation, 'pinned' | 'muted' | 'archived'>;
 const PREF_PREFIX = 'lyra:conversation-preferences:v1:';
-const DRAFT_PREFIX = 'lyra:draft:v1:';
+const DRAFT_PREFIX = 'lyra:draft:v2:';
+const OLD_DRAFT_PREFIX = 'lyra:draft:v1:';
 const safeSegment = (s: string) => encodeURIComponent(s);
 const storage = (): Storage | null => {
   try { return typeof localStorage === 'undefined' ? null : localStorage; }
@@ -29,14 +31,15 @@ export function saveConversationPreferences(user: string, preferences: Record<st
 const draftKey = (user: string, conversationId: string) => `${DRAFT_PREFIX}${safeSegment(user)}:${safeSegment(conversationId)}`;
 export function readDraft(user: string, conversationId: string): string {
   if (!user || !conversationId) return '';
-  try { return (storage()?.getItem(draftKey(user, conversationId)) ?? '').slice(0, 10000); }
+  try { const store=storage();const key=draftKey(user,conversationId);const current=store?.getItem(key);if(current!==null&&current!==undefined)return current.slice(0,10000);const old=(store?.getItem(OLD_DRAFT_PREFIX+key.slice(DRAFT_PREFIX.length))??'').slice(0,10000);const reply=parseInteraction(old);return reply?.kind==='reply'?reply.text:old; }
   catch { return ''; }
 }
 export function saveDraft(user: string, conversationId: string, value: string): void {
   if (!user || !conversationId) return;
   try {
     const key = draftKey(user, conversationId);
-    if (value) storage()?.setItem(key, value.slice(0, 10000));
-    else storage()?.removeItem(key);
+    const store=storage();
+    if(value)store?.setItem(key,value.slice(0,10000));else store?.removeItem(key);
+    store?.removeItem(OLD_DRAFT_PREFIX+key.slice(DRAFT_PREFIX.length));
   } catch { /* Ignore storage quota errors. */ }
 }

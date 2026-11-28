@@ -107,7 +107,7 @@ test('Hotfix: room history timeout tries Excel alias only on a fresh authenticat
   }finally{disconnectLoginSession();}
 });
 test('Hotfix: a malformed matching room returns a protocol error, not a timeout',async()=>{
- const socket=await login();try{const p=getRoomHistory('Team',1);await tick();socket.receive(history({name:'Team',chatMess:'invalid'},'GET_ROOM_CHAT_MES'));await assert.rejects(p,/không khớp tên nhóm/);}finally{disconnectLoginSession();}
+ const socket=await login();try{const p=getRoomHistory('Team',1);await tick();socket.receive(history({name:'Team',chatMess:'invalid'},'GET_ROOM_CHAT_MES'));await assert.rejects(p,/chatMess phải là mảng/);}finally{disconnectLoginSession();}
 });
 test('Hotfix: late realtime pairs once to an already loaded stable ID; second real row is preserved',()=>{
  const server=msg('10');const late=msg('live:late');const first=mergeChatHistory([server],[late]);assert.equal(first.length,1);assert.equal(first[0].reconciledLiveId,late.id);
@@ -143,4 +143,63 @@ test('Hotfix 2: a quarantined probe waits for an active SEND_CHAT before reconne
   fresh.receive({event:'CHECK_USER_ONLINE',status:'success',data:{status:true}});
   assert.equal(await probe,true);assert.equal(old.sent.filter(f=>f.data.event==='SEND_CHAT').length,1);
  } finally {disconnectLoginSession();}
+});
+
+test('Hotfix 3: only complete nested personal ACK matches, diagnostics do not disclose message content',async()=>{
+ const {websocketService}=await import('../src/services/websocket.ts');
+ const s=await login();const logs=[];const off=websocketService.onLog(e=>logs.push(e));
+ try {
+  const pending=peopleChatService.sendMessage('alice','bob','private marker',['123']);let settled=false;void pending.then(()=>{settled=true;});await tick();
+  s.receive({event:'SEND_CHAT',status:'success',data:{data:{name:'alice',to:'bob',mes:'private marker'}}});
+  s.receive({event:'SEND_CHAT',status:'success',data:{data:{...row(123,'alice','bob','private marker')}}});
+  s.receive({event:'SEND_CHAT',status:'success',data:{data:{...row(124,'alice','other','private marker')}}});
+  s.receive({event:'SEND_CHAT',status:'error',data:{data:{type:1,to:'Team'}}});
+  await tick();assert.equal(settled,false);
+  s.receive({event:'SEND_CHAT',status:'success',data:{data:row(125,'ALICE','BOB','private marker')}});
+  assert.equal((await pending).id,'125');assert.ok(logs.some(e=>e.detail==='ack-matched'));assert.ok(logs.some(e=>e.detail==='ack-replay'));assert.ok(logs.some(e=>e.detail==='ack-incomplete'));
+  assert.doesNotMatch(JSON.stringify(logs),/private marker|alice|bob|token/);
+ }finally{off();disconnectLoginSession();}
+});
+
+test('Hotfix 3: personal send without ACK releases queue after four seconds without retransmission',async t=>{
+ const s=await login();try{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const pending=peopleChatService.sendMessage('alice','bob','forward only');const rejected=assert.rejects(pending,UnconfirmedSendError);
+  await Promise.resolve();await Promise.resolve();await Promise.resolve();await Promise.resolve();await Promise.resolve();await Promise.resolve();await Promise.resolve();await Promise.resolve();
+  // Wait for the actual send before advancing its clock (no real timer).
+  for(let i=0;i<20&&event(s)!=='SEND_CHAT';i++)await Promise.resolve();
+  assert.equal(event(s),'SEND_CHAT');t.mock.timers.tick(4000);await rejected;
+  assert.equal(s.sent.filter(f=>f.data.event==='SEND_CHAT').length,1);
+ }finally{disconnectLoginSession();}
+});
+
+test('Hotfix 3: nested presence ignores other-user errors and returns actual boolean',async()=>{
+ const s=await login();try{
+  const pending=userService.checkUserOnline('bob');let settled=false;void pending.then(()=>{settled=true;});await tick();
+  s.receive({event:'CHECK_USER_ONLINE',status:'error',data:{data:{user:'carol',status:false}}});
+  s.receive({event:'CHECK_USER_ONLINE',status:'success',data:{data:{user:'carol',status:true}}});
+  await tick();assert.equal(settled,false);
+  s.receive({event:'CHECK_USER_ONLINE',status:'success',data:{data:{user:'BOB',status:false}}});assert.equal(await pending,false);
+ }finally{disconnectLoginSession();}
+});
+
+test('Hotfix 3: nested group ACK rejects unrelated personal error and other sender',async()=>{
+ const s=await login();try{
+  const pending=sendRoomMessage('Team','hello',{knownMessageIds:['1']});let settled=false;void pending.then(()=>{settled=true;});await tick();
+  s.receive({event:'SEND_CHAT',status:'error',data:{data:{type:0,to:'bob'}}});
+  s.receive(ack({data:row(2,'bob','Team','hello',1)}));s.receive(ack({data:row(1,'alice','Team','hello',1)}));
+  await tick();assert.equal(settled,false);s.receive(ack({data:row(3,'alice','Team','hello',1)}));assert.equal((await pending).id,'3');
+ }finally{disconnectLoginSession();}
+});
+
+test('P2 hotfix: wrong room is ignored; matching history with invalid roster resolves and logs only fixed codes',async()=>{
+ const {websocketService}=await import('../src/services/websocket.ts');
+ const s=await login();const logs=[];const off=websocketService.onLog(x=>logs.push(x));
+ try {
+  const p=getRoomHistory('Team',1,{timeoutMs:1000});await tick();
+  s.receive(history({name:'OtherSecretRoom',user:[],chatMess:[]},'GET_ROOM_CHAT_MES'));
+  s.receive(history({name:'Team',user:[{name:'private-member'}],chatMess:[row(42,'alice','Team','private-message',1)]},'GET_ROOM_CHAT_MES'));
+  const result=await p;assert.equal(result.messages[0].id,'42');assert.equal(result.room.user,undefined);assert.ok(result.membersError);
+  const text=JSON.stringify(logs);assert.match(text,/room-history-name/);assert.match(text,/room-history-members/);assert.doesNotMatch(text,/OtherSecretRoom|private-member|private-message/);
+ }finally{off();disconnectLoginSession();}
 });

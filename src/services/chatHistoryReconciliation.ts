@@ -2,7 +2,7 @@ import type { ChatMessage } from '../types/chat.ts';
 import { parseChatTime } from '../utils/chatTime.ts';
 import { sameChatUser } from './serverMessage.ts';
 
-const provisional = (m: ChatMessage) => /^(live|ack|local):/.test(m.id);
+const provisional = (m: ChatMessage) => /^(live|ack|local|unverified):/.test(m.id);
 const sameParty = (a?:string,b?:string) => (!a && !b) || sameChatUser(a ?? '',b ?? '');
 const time = (m:ChatMessage) => parseChatTime(m.createdAt);
 function sameMessage(a:ChatMessage,b:ChatMessage,tolerance=2000):boolean {
@@ -20,7 +20,7 @@ export function mergeChatHistory(previous: ChatMessage[], page: ChatMessage[]): 
   for (const m of page) {
     if (provisional(m)) continue;
     const old=stable.get(m.id);
-    stable.set(m.id, {...m,...(old?.sendStatus==='confirmed'?{sendStatus:'confirmed' as const}:{}),
+    stable.set(m.id, {...m,...(old && old.historyPage===undefined?{historyPage:undefined}:{}),...(old?.sendStatus==='confirmed'?{sendStatus:'confirmed' as const}:{}),
       ...(old?.reconciledLiveId?{reconciledLiveId:old.reconciledLiveId}:{})});
   }
   const pending = [...new Map([...previous,...page].filter(provisional).map(m=>[m.id,m])).values()];
@@ -58,7 +58,7 @@ export function mergeChatHistory(previous: ChatMessage[], page: ChatMessage[]): 
     if(locals.filter(other=>eligible(other,row)).length!==1)continue;
     links.set(local.id,row.id);
   }
-  return [...stable.values(),...pending.filter(m=>!used.has(m.id)).map(m=>m.id.startsWith('local:')?{...m,historyMatchId:links.get(m.id)}:m)];
+  return [...stable.values(),...pending.filter(m=>!used.has(m.id)&&!(m.backupOriginalId&&stable.has(m.backupOriginalId))).map(m=>m.id.startsWith('local:')?{...m,historyMatchId:links.get(m.id)}:m)];
 }
 
 /** Render one bubble for a linked send, but explicitly report that its ACK is missing. */

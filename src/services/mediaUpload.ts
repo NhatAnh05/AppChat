@@ -1,5 +1,6 @@
 import { assertCurrentSession, currentSessionSignal } from './sessionScope.ts';
 import type { LyraMedia, LyraMediaKind } from "./mediaMessage.ts";
+import { voiceBytesMatch } from "./voiceWav.ts";
 import { isSafeMediaUrl } from "./mediaMessage.ts";
 
 // Tải file trực tiếp vào máy chủ media đi kèm dự án, không dùng Cloudinary.
@@ -14,14 +15,15 @@ function mediaEndpoint(user: string, target: string, isGroup: boolean): string {
 }
 const fileTypes: Record<string,string> = {
   png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',webp:'image/webp',avif:'image/avif',
-  mp4:'video/mp4',webm:'video/webm',mov:'video/quicktime',pdf:'application/pdf',txt:'text/plain',csv:'text/csv',zip:'application/zip',
+  wav:'audio/wav',weba:'audio/webm',m4a:'audio/mp4',mp4:'video/mp4',webm:'video/webm',mov:'video/quicktime',pdf:'application/pdf',txt:'text/plain',csv:'text/csv',zip:'application/zip',
   docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 };
 export function mediaMime(file: Pick<File,'name'|'type'>): string {
   if (file.type==='application/x-zip-compressed') return 'application/zip';
   if (file.type==='application/x-zip') return 'application/zip';
-  return file.type && file.type !== 'application/octet-stream' ? file.type : fileTypes[file.name.split('.').at(-1)?.toLowerCase() || ''] || 'application/octet-stream';
+  const base = file.type.split(';')[0].trim().toLowerCase();
+  return base && base !== 'application/octet-stream' ? base : fileTypes[file.name.split('.').at(-1)?.toLowerCase() || ''] || 'application/octet-stream';
 }
 export const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
@@ -34,6 +36,8 @@ export async function uploadMedia(file: File, kind: LyraMediaKind, user: string,
   if (kind === "image" && !mime.startsWith("image/")) throw new Error("Hãy chọn tệp ảnh.");
   if (kind === "video" && !mime.startsWith("video/")) throw new Error("Hãy chọn tệp video.");
   if (kind === "gif" && mime !== "image/gif") throw new Error("Hãy chọn tệp GIF.");
+
+  if (kind === "audio" && !["audio/webm","audio/mp4","audio/wav"].includes(mime)) throw new Error("Định dạng ghi âm không được hỗ trợ.");
 
   let response: Response;
   try {
@@ -73,6 +77,16 @@ export async function uploadMedia(file: File, kind: LyraMediaKind, user: string,
   if (/^https?:\/\/(localhost|127\.0\.0\.1)(?::|\/)/i.test(url) && !import.meta.env.DEV) {
     throw new Error("Không thể gửi tệp bằng địa chỉ localhost khi triển khai. Cấu hình VITE_MEDIA_PUBLIC_BASE_URL trỏ tới máy chủ media HTTPS công khai.");
   }
-  const displayKind: LyraMediaKind = mime === "image/gif" ? "gif" : kind === "file" && mime.startsWith("image/") ? "image" : kind === "file" && mime.startsWith("video/") ? "video" : kind;
+  // Confirm the exact recording is readable before sending its URL via SEND_CHAT.
+  // No automatic retransmission; preserve the local preview if this check fails.
+  if(kind==='audio') {
+    try {
+      const check=await fetch(url,{credentials:'same-origin',signal:session,cache:'no-store'});
+      if(!check.ok || check.headers.get('content-type')?.split(';')[0]!==mime || Number(check.headers.get('content-length'))!==file.size)throw new Error('Invalid response');
+      const stored=await check.arrayBuffer();assertCurrentSession(session);
+      if(!voiceBytesMatch(await file.arrayBuffer(),stored))throw new Error('Mismatched bytes');
+    }catch{assertCurrentSession(session);throw new Error('Không xác minh được bản ghi đã tải lên. Bản nghe thử vẫn được giữ; chưa gửi tin nhắn.');}
+  }
+  const displayKind: LyraMediaKind = mime === "image/gif" ? "gif" : kind === "file" && mime.startsWith("image/") ? "image" : kind === "file" && mime.startsWith("video/") ? "video" : kind === "file" && mime.startsWith("audio/") ? "audio" : kind;
   return { kind: displayKind, url, name: file.name, size: file.size };
 }

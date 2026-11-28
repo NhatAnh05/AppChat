@@ -1,5 +1,5 @@
 import { currentSessionSignal, assertCurrentSession, isCurrentSession } from '../services/sessionScope.ts';
-import { resolveLocalMediaUrl } from "../services/mediaMessage.ts";
+import { resolveLocalMediaUrl, mediaMessagePreview } from "../services/mediaMessage.ts";
 import { historyDisplayMessages } from "../services/chatHistoryReconciliation.ts";
 import { parseChatTime } from "../utils/chatTime";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -27,7 +27,7 @@ type MessageListProps = {
   onCloseTools?: () => void;
 };
 type ViewMode = 'all' | 'saved' | 'media';
-type MediaFilter = 'all' | 'image' | 'video' | 'file';
+type MediaFilter = 'all' | 'image' | 'video' | 'file' | 'audio';
 type ForwardTarget = {id: string; name: string; kind: 'people' | 'group'};
 
 export default function MessageList({ chatId, currentUserId, username, isPeopleChat, onReply, toolsOpen = false, onCloseTools }: MessageListProps) {
@@ -75,15 +75,18 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
     ...groups.map(group => ({id:group.id,name:group.name,kind:'group' as const})),
   ];
 
-  const reactions: ReactionState = new Map();
-  for (const message of chatMessages) {
-    const event = parseInteraction(message.content);
-    if (event?.kind === 'reaction') {
-      applyReactionEvent(reactions, {targetId:event.targetId, senderId:message.senderId,
-        emoji:event.emoji, operation:event.operation});
+  const reactions = useMemo(() => {
+    const result: ReactionState = new Map();
+    for (const message of chatMessages) {
+      const event = parseInteraction(message.content);
+      if (event?.kind === 'reaction') {
+        applyReactionEvent(result, {targetId:chatMessages.find(row=>row.reconciledLiveId===event.targetId)?.id ?? event.targetId, senderId:message.senderId,
+          emoji:event.emoji, operation:event.operation});
+      }
     }
-  }
-  for (const event of pending) applyReactionEvent(reactions, event);
+    for (const event of pending) applyReactionEvent(result, event);
+    return result;
+  }, [chatMessages, pending]);
   const latestMessageId = visibleMessages.at(-1)?.id;
   const updatePending = (next: ReactionEvent[]) => { pendingRef.current = next; setPending(next); };
 
@@ -201,7 +204,7 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
     if (!target || forwardBusy) return;
     const originals = visibleMessages.filter(m => forwardIds.includes(m.id)).slice(0, 10);
     const contents = originals.map(forwardContent);
-    if (contents.some(c => !c)) { setFeedback('Có tin nhắn không thể chuyển tiếp (quá dài hoặc không hợp lệ).'); return; }
+    if (contents.some(c => !c)) { setFeedback('Có tin không thể chuyển tiếp (quá dài, không hợp lệ hoặc tệp giới hạn quyền theo hội thoại). Hãy tải và gửi lại tệp nếu có quyền.'); return; }
     setForwardBusy(true);
     let completed = 0;
     const session = workspaceSession;
@@ -242,8 +245,8 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
     setView('all'); setSearch('');
     window.requestAnimationFrame(() => {
       const list = listRef.current;
-      const target = document.getElementById(`lyra-message-${id}`);
-      if (!list || !target) return;
+      const target = document.getElementById(`lyra-message-${id}`) ?? document.getElementById(`lyra-message-${chatMessages.find(m=>m.reconciledLiveId===id)?.id ?? ''}`);
+      if (!list || !target || !list.contains(target)) {setFeedback('Tin gốc chưa có trong lịch sử đã tải. Hãy tải thêm lịch sử.');return;}
       const listRect = list.getBoundingClientRect();
       const targetRect = target.getBoundingClientRect();
       list.scrollTo({
@@ -271,8 +274,8 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
       {view === 'media' && (firstPageLoaded || visibleMessages.length>0) ? <div className="lyra-workspace-gallery">
         {mediaItems.length===0 ? <p className="empty-messages">Không có tệp tương ứng trong lịch sử đã tải.</p> : mediaItems.map(media => {
           const url=resolveLocalMediaUrl(media.url, window.location.origin, Boolean(import.meta.env.DEV && import.meta.env.VITE_LYRA_LOCAL_MEDIA === '1'));
-          return <article className="lyra-workspace-media-card" key={`${media.messageId}-${media.url}`}>
-          {media.kind==='image'||media.kind==='gif' ? <img src={url} alt={media.name} loading="lazy" referrerPolicy="no-referrer"/> : <i className={`bi bi-${media.kind==='video'?'camera-video':'file-earmark-text'}`} aria-hidden="true"/>}
+          return <article className="lyra-workspace-media-card" key={`${media.messageId}-${media.index}`}>
+          {media.kind==='image'||media.kind==='gif' ? <img src={url} alt={media.name} loading="lazy" referrerPolicy="no-referrer"/> : <i className={`bi bi-${media.kind==='video'?'camera-video':media.kind==='audio'?'mic':'file-earmark-text'}`} aria-hidden="true"/>}
           <strong title={media.name}>{media.name}</strong><small>Gửi bởi {media.sender}</small>
           <div><button type="button" onClick={()=>jumpTo(media.messageId)}>Xem tin</button><a href={url} rel="noopener noreferrer" target="_blank" referrerPolicy="no-referrer">Mở tệp</a></div>
         </article>;})}
@@ -283,7 +286,7 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
           reactions={Array.from(reactions.get(message.id)?.values()??[]).flatMap(set=>[...set])}
           currentReactions={[...(reactions.get(message.id)?.get(currentUserId.toLowerCase())??new Set<string>())]}
           onReaction={emoji=>void reactTo(message.id,emoji)}
-          onReply={()=>onReply?.({id:message.id,sender:message.senderName??message.senderId,excerpt:visibleMessageContent(message.content).slice(0,120)})}
+          onReply={()=>onReply?.({id:message.id,sender:message.senderName??message.senderId,excerpt:mediaMessagePreview(visibleMessageContent(message.content)).slice(0,120)})}
           onJumpReply={jumpTo}
           bookmarked={bookmarks.includes(bookmarkId(message))} onBookmark={()=>toggleBookmark(message)}
           onForward={()=>openForward([message.id])}
@@ -311,7 +314,7 @@ export default function MessageList({ chatId, currentUserId, username, isPeopleC
               {search && <button type="button" onClick={() => setSearch('')} aria-label="Xóa tìm kiếm">×</button>}
             </label> : <label className="lyra-workspace-media-filter">Lọc tệp
               <select value={mediaFilter} onChange={event => setMediaFilter(event.target.value as MediaFilter)}>
-                <option value="all">Tất cả</option><option value="image">Ảnh & GIF</option><option value="video">Video</option><option value="file">Tệp</option>
+                <option value="all">Tất cả</option><option value="image">Ảnh & GIF</option><option value="video">Video</option><option value="audio">Ghi âm</option><option value="file">Tệp</option>
               </select>
             </label>}
             <small>Chỉ tìm trong những tin đã tải. Bấm Đóng để xem kết quả.</small>

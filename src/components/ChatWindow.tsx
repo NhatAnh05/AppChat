@@ -23,11 +23,12 @@ type ChatWindowProps = {
     presenceChecking?: boolean
     unreadCount?: number
     onOpenNotifications?: () => void
+    onOpenApiLog?: () => void
     onCompose?: () => void
     onOpenSettings?: () => void
 }
 
-export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLeft, onCheckPresence, presenceChecking, presenceError, unreadCount = 0, onOpenNotifications, onCompose, onOpenSettings}: ChatWindowProps) {
+export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLeft, onCheckPresence, presenceChecking, presenceError, unreadCount = 0, onOpenNotifications, onOpenApiLog, onCompose, onOpenSettings}: ChatWindowProps) {
     const dispatch = useDispatch<AppDispatch>()
     const [session] = useState(currentSessionSignal)
     const [detailOpen, setDetailOpen] = useState(false)
@@ -47,6 +48,8 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
     const history=useSelector((state:RootState)=>chatId?state.messages.historyByChat[chatId]:undefined);
     const members=history?.roomMembers??[];
     const membersLoading=Boolean(history?.loading);
+    const membersError=history?.roomMembersError||history?.error;
+    const membersKnown=history?.roomMembers!==undefined;
 
     useEffect(() => {
         if (!chatId || chatName === undefined || !isCurrentSession(session)) return
@@ -131,10 +134,12 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
 
                 <div className="chat-header-info">
                     <h2>{chat.name}</h2>
-                    <span>{chat.kind === 'group' ? 'Nhóm trò chuyện' : chat.online === true ? 'Đang hoạt động' : chat.online === false ? 'Ngoại tuyến' : 'Chưa rõ trạng thái'}</span>
+                    <span>{chat.kind === 'group' ? 'Nhóm trò chuyện' : chat.online === true ? 'Đang hoạt động' : chat.online === false ? 'Máy chủ báo ngoại tuyến' : 'Chưa rõ trạng thái'}</span>
+                    {chat.kind === 'people' && chat.recentIncomingAt !== undefined && chat.online !== true && <small title="Đã nhận tin realtime gần đây; không thay thế kết quả API online">Vừa nhận tin · trạng thái có thể khác thực tế</small>}
                     {chat.kind === 'people' && presenceError && <small role="status" title={presenceError} style={{color:'#b45309',fontSize:'11px'}}>Không kiểm tra được: {presenceError}</small>}
                 </div>
                 <div className="chat-header-actions">
+                    {onOpenApiLog && <button type="button" className="chat-circle-btn" title="Nhật ký API" aria-label="Nhật ký API" onClick={onOpenApiLog}><i className="bi bi-file-earmark-text" /></button>}
                     {chat.kind === 'people' && onCheckPresence && <button type="button" className="chat-circle-btn" title="Cập nhật trạng thái hoạt động" aria-label="Cập nhật trạng thái hoạt động" disabled={presenceChecking} onClick={() => void onCheckPresence(chat.id)}><i className="bi bi-arrow-clockwise" /></button>}
                     <button type="button" className="chat-circle-btn lyra-bell-button" title="Thông báo" aria-label={`Thông báo${unreadCount ? `: ${unreadCount} tin chưa đọc` : ""}`} onClick={onOpenNotifications}><i className="bi bi-bell" />{unreadCount > 0 && <span className="lyra-bell-dot"/>}</button>
                     <button type="button" className="chat-tools-trigger" title="Tìm kiếm và công cụ tin nhắn" aria-label="Tìm kiếm và công cụ tin nhắn" aria-expanded={toolsOpen} onClick={() => setToolsOpen(old => !old)}><i className="bi bi-search" /></button>
@@ -150,18 +155,20 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
                     <button className="lyra-icon-close" onClick={() => setDetailOpen(false)} aria-label="Đóng"><i className="bi bi-x-lg" /></button>
                     <div className="lyra-detail-cover" />
                     <div className="lyra-detail-avatar" style={{background:chat.avatarColor}}>{chat.avatar}</div>
-                    <h2>{chat.name}</h2><span className="lyra-detail-status">{chat.kind === "group" ? "Nhóm trò chuyện" : chat.online === true ? "Đang hoạt động" : chat.online === false ? "Ngoại tuyến" : "Chưa rõ trạng thái"}</span>
+                    <h2>{chat.name}</h2><span className="lyra-detail-status">{chat.kind === "group" ? "Nhóm trò chuyện" : chat.online === true ? "Đang hoạt động" : chat.online === false ? "Máy chủ báo ngoại tuyến" : "Chưa rõ trạng thái"}</span>
                     <div className="lyra-detail-info"><i className="bi bi-at" /><div><small>{chat.kind === "group" ? "Tên phòng" : "Tên tài khoản"}</small><strong>{chat.name}</strong></div></div>
                     <div className="lyra-detail-info"><i className="bi bi-shield-check" /><div><small>Thông tin tài khoản</small><span>Hồ sơ chỉ hiển thị dữ liệu máy chủ cung cấp</span></div></div>
                     {chat.kind === 'group' && <section className="lyra-group-members">
                         <div className="lyra-group-detail-heading">
-                            <h3>Thành viên {membersLoading ? '' : `(${members.length})`}</h3>
+                            <h3>Thành viên {membersKnown && !membersLoading && !membersError ? `(${members.length})` : ''}</h3>
                             <button type="button" disabled={membersLoading} onClick={() => { void openDetails(); }}>
                                 <i className="bi bi-arrow-clockwise" /> Làm mới
                             </button>
                         </div>
                         {membersLoading && <p className="lyra-small-note" role="status">Đang tải thành viên từ máy chủ...</p>}
-                        {!membersLoading && !roomError && members.length === 0 && <p className="lyra-small-note">Chưa có dữ liệu thành viên.</p>}
+                        {!membersLoading && membersError && <p className="lyra-small-note" role="status">{membersKnown ? 'Danh sách đã tải trước đó; chưa cập nhật được.' : 'Chưa xác định số thành viên.'} {membersError}</p>}
+                        {!membersLoading && !membersError && !membersKnown && <p className="lyra-small-note">Chưa có dữ liệu thành viên.</p>}
+                        {!membersLoading && !membersError && membersKnown && members.length === 0 && <p className="lyra-small-note">Máy chủ trả danh sách thành viên rỗng.</p>}
                         <div className="lyra-group-invitation">
                             <button type="button" onClick={() => {void copyGroupName();}}><i className="bi bi-clipboard" /> Sao chép tên nhóm để mời</button>
                             <small>Mời bằng tên phòng có sẵn của API, không tạo link hoặc API thêm người giả.</small>
@@ -171,7 +178,7 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
                             <input type="search" value={memberQuery} onChange={event => setMemberQuery(event.target.value)} placeholder="Tìm thành viên..." aria-label="Tìm thành viên nhóm" />
                         </label>
                         <div className="lyra-group-member-list">
-                            {filteredMembers.map(member => <div key={member.id} className="lyra-group-member">
+                            {filteredMembers.map(member => <div key={`${member.id}:${member.name}`} className="lyra-group-member">
                                 <span className="lyra-group-member-avatar">{member.name.slice(0, 2).toUpperCase()}</span>
                                 <span>{member.name}</span>
                                 <button type="button" className="lyra-group-mention" title={`Nhắc ${member.name} trong tin nhắn`} onClick={() => {
@@ -181,7 +188,7 @@ export default function ChatWindow({chat, currentUserId, onMessageSent, onRoomLe
                             </div>)}
                         </div>
                         {!membersLoading && !roomError && members.length > 0 && filteredMembers.length === 0 && <p className="lyra-small-note">Không tìm thấy thành viên.</p>}
-                        {(roomError || history?.error) && <p role="alert" className="login-error">{roomError || history?.error}</p>}
+                        {roomError && roomError!==history?.error && <p role="alert" className="login-error">{roomError}</p>}
                         {!leaveConfirm ? (
                             <button type="button" className="lyra-group-leave-trigger" onClick={() => { setRoomError(''); setLeaveConfirm(true); }}>
                                 <i className="bi bi-box-arrow-right" /> Rời nhóm

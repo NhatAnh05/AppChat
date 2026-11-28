@@ -125,6 +125,10 @@ export function requestChatHistory(name: string, page: number, kind: HistoryKind
               return;
             }
             if (historyResponseMatches(response, kind, name, currentUser)) finish(undefined, {...response,data:unwrapHistoryData(response.data)});
+            else if(kind==='room' && (response.event===ROOM_EVENT || response.event===HISTORY_EVENT)) {
+              const data=unwrapHistoryData(response.data);
+              if(data && typeof data==='object' && !Array.isArray(data)) websocketService.diagnostic('GET_ROOM_CHAT_MES','name' in data?'room-history-name':'room-history-data');
+            }
           };
           cleanups.push(websocketService.on(HISTORY_EVENT, receive));
           cleanups.push(websocketService.on(ALTERNATES[kind], receive));
@@ -153,6 +157,7 @@ export function requestChatHistory(name: string, page: number, kind: HistoryKind
         // Never let an uncorrelated late reply from the old socket satisfy it.
         if (error instanceof HistoryTimeoutError) {
           cooldown.set(kind,Date.now()+120_000);
+          if(kind==='room')websocketService.diagnostic('GET_ROOM_CHAT_MES','room-history-timeout');
           if (kind==='room' && fallbackOnTimeout && index+1<candidates.length && !signal?.aborted) {
             await ensureCorrelatedConnection(session,'probe');
             if (signal?.aborted) throw new Error('Đã hủy tải lịch sử.', { cause: error });

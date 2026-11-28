@@ -1,3 +1,4 @@
+import { parseChatTime } from '../utils/chatTime.ts';
 import { currentSessionSignal, assertCurrentSession } from './sessionScope.ts';
 import { websocketService } from './websocket.ts';
 import { ensureCorrelatedConnection, quarantineResponse, enqueueAuthenticatedRequest } from './requestCorrelation.ts';
@@ -6,14 +7,18 @@ export type UserListItem = {name: string; type: 0 | 1; actionTime: string};
 
 export function parseUserList(payload: unknown): UserListItem[] | null {
     if (!Array.isArray(payload)) return null;
-    const result: UserListItem[] = [];
+    const result = new Map<string,UserListItem>();
     for (const item of payload) {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
         const row = item as Record<string, unknown>;
         if (typeof row.name !== 'string' || !row.name.trim() || (row.type !== 0 && row.type !== 1)) return null;
-        result.push({name:row.name.trim(),type:row.type,actionTime:typeof row.actionTime === 'string' ? row.actionTime : ''});
+        const name=row.name.trim(), actionTime=typeof row.actionTime==='string'?row.actionTime:'';
+        const key=`${row.type}:${name.toLowerCase()}`;
+        const previous=result.get(key);
+        if(!previous)result.set(key,{name,type:row.type,actionTime});
+        else if((parseChatTime(actionTime)||0)>(parseChatTime(previous.actionTime)||0))result.set(key,{...previous,actionTime});
     }
-    return result;
+    return [...result.values()];
 }
 
 let pendingList: Promise<UserListItem[]> | null = null;

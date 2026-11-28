@@ -1,10 +1,11 @@
+import { roomHistoryRowsShape } from './roomChatProtocol.ts';
 import { currentSessionSignal, assertCurrentSession } from './sessionScope.ts';
 /** Group-related authenticated WebSocket operations. No success is invented on timeout. */
 import { getAuthenticatedUsername } from './loginService.ts';
 import { websocketService, type WebSocketMessage } from './websocket.ts';
 import { normalizeRoomName, parseJoinRoomResponse, parseLeaveRoomResponse,
   parseRoomHistoryResponse, parseRoomSendResponse, makeRoomHistoryRequest,
-  makeRoomMessageRequest, type RoomDetails } from './roomChatProtocol.ts';
+  makeRoomMessageRequest, type RoomDetails, type RoomHistoryDetails } from './roomChatProtocol.ts';
 import type { ChatMessage } from '../types/chat.ts';
 import { requestChatHistory } from './chatHistoryTransport.ts';
 import { ensureCorrelatedConnection, quarantineResponse, UnconfirmedSendError, enqueueAuthenticatedRequest } from './requestCorrelation.ts';
@@ -74,7 +75,7 @@ export async function leaveRoom(rawName:string,options:Options={}):Promise<void>
   },options).then(()=>{cancelRoomHistory(name);}));
 }
 /** Lịch sử cá nhân và nhóm chia sẻ đúng một hàng đợi vì server dùng cùng event. */
-export async function getRoomHistory(rawName:string,page=1,options:Options={}):Promise<{room:RoomDetails;messages:ChatMessage[]}>{
+export async function getRoomHistory(rawName:string,page=1,options:Options={}):Promise<{room:RoomHistoryDetails;messages:ChatMessage[];membersError?:string}>{
   const name=normalizeRoomName(rawName);
   makeRoomHistoryRequest(name,page); // Kiểm tra số trang trước khi gửi.
   const session=currentSessionSignal();
@@ -91,9 +92,15 @@ export async function getRoomHistory(rawName:string,page=1,options:Options={}):P
     assertCurrentSession(session);
     if(controller.signal.aborted)throw new Error('Đã hủy tải lịch sử nhóm.');
     const result=parseRoomHistoryResponse(frame,name);
-    if(!result) throw new Error('Máy chủ trả dữ liệu lịch sử nhóm không đúng định dạng.');
-    if(result.status==='error') throw new Error(result.message);
-    return {room:result.room,messages:result.messages};
+    if(!result) {websocketService.diagnostic('GET_ROOM_CHAT_MES','room-history-data');throw new Error('Máy chủ trả dữ liệu lịch sử nhóm không đúng định dạng.');}
+    if(result.status==='error') {websocketService.diagnostic('GET_ROOM_CHAT_MES',result.diagnostic);
+      if(result.diagnostic==='room-history-rows') {
+        const outer=frame.data as {name?:unknown;chatMess?:unknown;data?:{chatMess?:unknown}}|undefined;
+        websocketService.diagnostic('GET_ROOM_CHAT_MES',roomHistoryRowsShape(outer?.name!==undefined?outer.chatMess:outer?.data?.chatMess));
+      }
+      throw new Error(result.message);}
+    websocketService.diagnostic('GET_ROOM_CHAT_MES',result.membersError?'room-history-members':'room-history-ok');
+    return {room:result.room,messages:result.messages,membersError:result.membersError};
   } finally {
     requests.delete(controller);if(!requests.size && roomHistoryRequests.get(key)===requests)roomHistoryRequests.delete(key);
     options.signal?.removeEventListener('abort',abort);session.removeEventListener('abort',abort);
@@ -104,7 +111,11 @@ export async function sendRoomMessage(rawName:string,content:string,options:Opti
   const payload=makeRoomMessageRequest(name,content).data.data;
   const session=currentSessionSignal();
   return enqueueChatSend(()=>{assertCurrentSession(session);return request('SEND_CHAT',payload,frame=>{
-    if(frame.status==='error' && frame.data && typeof frame.data==='object' && 'type' in frame.data && (frame.data.type===0 || frame.data.type==='0' || frame.data.type==='people'))return null;
+    if(frame.status==='error') {
+      const outer=frame.data as {type?:unknown;to?:unknown;name?:unknown;data?:{type?:unknown;to?:unknown;name?:unknown}}|null;
+      const row=outer?.data??outer;
+      if(row?.type===0||row?.type==='0'||row?.type==='people'||typeof row?.to==='string'&&row.to.trim().toLowerCase()!==name.toLowerCase()||typeof row?.name==='string'&&row.name.trim().toLowerCase()!==getAuthenticatedUsername()?.trim().toLowerCase())return null;
+    }
     const result=parseRoomSendResponse(frame,name,content);
     if(!result)return null;
     if(result.status==='error')throw new Error(result.message);
@@ -118,6 +129,7 @@ export async function sendRoomMessage(rawName:string,content:string,options:Opti
       if (seen.has(scopedId) || options.knownMessageIds?.includes(id)) return null;
       seen.add(scopedId);groupAcknowledged.set(socket,seen);
     }
+    websocketService.diagnostic('SEND_CHAT','ack-matched');
     return {...result.message, id:id.startsWith('live:') ? id.replace('live:','ack:') : id, sendStatus:'confirmed' as const};
   },options);});
 }

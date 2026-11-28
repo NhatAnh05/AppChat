@@ -34,10 +34,12 @@ import { decodeChatContent } from "./services/chatContentCodec";
 import { mediaMessagePreview } from "./services/mediaMessage";
 import { parseInteraction, visibleMessageContent } from "./services/messageInteractions";
 import {userService} from "./services/userService.ts";
+import { parseChatBackup, MAX_CHAT_BACKUP_BYTES } from "./services/chatBackup.ts";
+import { isUserMessage } from "./services/messageWorkspace.ts";
 import { notifyIncomingMessage } from "./services/desktopNotifications.ts";
 import { PRESENCE_REFRESH_MS } from "./services/chatRefreshPolicy.ts";
 import { logoutCurrentSession } from "./services/logoutService.ts";
-import { setContactOnline, clearOnlineStatuses, expireOnlineStatuses } from "./features/contacts/contactsSlice";
+import { setContactOnline, clearOnlineStatuses, expireOnlineStatuses, recordContactIncoming } from "./features/contacts/contactsSlice";
 import { getConnectionState, subscribeConnectionState } from "./services/connectionHealth.ts";
 import { getChatUnread, getTotalUnreadForChats, markChatRead, readUnreadLedger, recordIncomingMessage,
     reconcileUnreadMessages, saveUnreadLedger } from "./services/unreadNotifications.ts";
@@ -59,9 +61,11 @@ function mapContactToChat(contact: ContactEntry, kind: "people" | "group"): Chat
         name: contact.name,
         avatar: contact.initials,
         avatarColor: contact.color,
+        actionTime: contact.detail,
         lastMessage: "",
         time: "",
         online: contact.online,
+        recentIncomingAt: contact.recentIncomingAt,
         kind,
     };
 }
@@ -171,7 +175,9 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         if (!incoming) return;
         const message = {...incoming, createdAt:data.createAt??new Date(receivedAt).toISOString(), orderAt:new Date(receivedAt).toISOString()};
         if (store.getState().messages.messages.some(m=>m.chatId===message.chatId&&m.id===message.id))return;
+        const before=store.getState().messages.messages;
         dispatch(addMessage(message));
+        if(!isUserMessage(message)||store.getState().messages.messages.some(row=>row.chatId===message.chatId&&row.reconciledLiveId===message.id&&before.some(old=>old.chatId===row.chatId&&old.id===row.id)))return;
         setUnreadLedger(previous => recordIncomingMessage(previous, message, currentUserId,
             selectedForSync.current?.id ?? null, document.visibilityState === 'visible' && document.hasFocus()));
         notifyIncomingMessage(currentUserId, message.senderName ?? message.senderId, `${message.chatId}:${message.id}`);
@@ -202,6 +208,8 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
         };
         if(store.getState().messages.messages.some(m=>m.chatId===chatId&&m.id===incomingMessage.id))return;
         dispatch(addMessage(incomingMessage));
+        dispatch(recordContactIncoming({id:chatId,at:Date.now()}));
+        if(!isUserMessage(incomingMessage)||store.getState().messages.messages.some(row=>row.chatId===chatId&&row.reconciledLiveId===incomingMessage.id))return;
         setUnreadLedger(previous=>recordIncomingMessage(previous,incomingMessage,currentUserId,
             selectedForSync.current?.id??null,document.visibilityState==='visible'&&document.hasFocus()));
         notifyIncomingMessage(currentUserId,data.name,`${chatId}:${incomingMessage.id}`);
@@ -302,7 +310,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                 const current=store.getState().contacts;
                 const mergedFriends:ContactEntry[]=items.filter(item=>item.type===0).map(item=>{
                     const existing=current.friends.find(friend=>sameGroupName(friend.id,item.name));
-                    return {...mapUserToContact(item,'friend'),id:existing?.id??item.name,online:existing?.online,onlineCheckedAt:existing?.onlineCheckedAt};
+                    return {...mapUserToContact(item,'friend'),id:existing?.id??item.name,online:existing?.online,onlineCheckedAt:existing?.onlineCheckedAt,recentIncomingAt:existing?.recentIncomingAt};
                 });
                 for(const friend of current.friends)if(!mergedFriends.some(item=>sameGroupName(item.id,friend.id)))mergedFriends.push(friend);
                 dispatch(setFriends(mergedFriends));
@@ -381,7 +389,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const presentedChats = useMemo(() => {
         const latestByChat = new Map<string, typeof messages[number]>();
         for (const message of messages) {
-            if (parseInteraction(message.content)?.kind === "reaction") continue;
+            if (parseInteraction(message.content)?.kind === "reaction" || message.id.startsWith('unverified:backup:')) continue;
             const key = message.chatId.toLowerCase();
             const previous = latestByChat.get(key);
             if (!previous || parseChatTime(message.orderAt ?? message.createdAt) >=
@@ -394,8 +402,8 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                 ...chat,
                 unreadCount: getChatUnread(unreadLedger, chat.id),
                 lastMessage: latestMessage ? `${latestMessage.senderId.toLowerCase() === currentUserId.toLowerCase() ? "Bạn: " : ""}${preview}` : '',
-                time: latestMessage ? formatChatTime(latestMessage.createdAt) : '',
-                lastActivity: latestMessage ? parseChatTime(latestMessage.orderAt ?? latestMessage.createdAt) : 0,
+                time: latestMessage ? formatChatTime(latestMessage.createdAt) : (chat.actionTime&&Number.isFinite(parseChatTime(chat.actionTime))?formatChatTime(chat.actionTime):''),
+                lastActivity: Math.max((latestMessage?parseChatTime(latestMessage.orderAt??latestMessage.createdAt):0)||0,parseChatTime(chat.actionTime??'')||0),
             };
         }).sort((a,b) => b.lastActivity - a.lastActivity);
     }, [chats, messages, currentUserId, unreadLedger]);
@@ -417,7 +425,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const currentChat = useMemo(() => {
         if (!selectedChat || selectedChat.kind === 'group') return selectedChat;
         const friend = friends.find(item => item.id.toLowerCase() === selectedChat.id.toLowerCase());
-        return {...selectedChat, online: friend?.online};
+        return {...selectedChat, online: friend?.online, recentIncomingAt:friend?.recentIncomingAt};
     }, [selectedChat, friends]);
 
     const handleLogout = async () => {
@@ -597,7 +605,9 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const exportHistory = () => {
         if (!isCurrentSession(session)) return;
         const data = {format: "lyrachat-local-history-v1", exportedAt: new Date().toISOString(), userId: currentUserId, messages: store.getState().messages.messages};
-        const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type: "application/json"}));
+        const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+        if(blob.size>MAX_CHAT_BACKUP_BYTES){alert('Bản sao vượt 8 MiB, không thể nhập lại bằng phiên bản này.');return;}
+        const url = URL.createObjectURL(blob);
         const anchor = document.createElement("a");
         anchor.href = url;
         anchor.download = `lyrachat-${currentUserId}-history.json`;
@@ -608,13 +618,13 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
     const importHistory = async (file: File | undefined) => {
         if (!file) return;
         try {
-            const backup = JSON.parse(await file.text()) as {format?: string; userId?: string; messages?: unknown};
-            if (backup.format !== "lyrachat-local-history-v1" || backup.userId !== currentUserId || !Array.isArray(backup.messages) || backup.messages.length > 200000) throw new Error("Tệp sao lưu không hợp lệ hoặc không thuộc tài khoản hiện tại.");
-            const valid = backup.messages.every(item => item && typeof item === "object" && typeof item.id === "string" && typeof item.chatId === "string" && typeof item.senderId === "string" && typeof item.content === "string" && typeof item.createdAt === "string");
-            if (!valid) throw new Error("Dữ liệu tin nhắn không đúng định dạng.");
-            assertCurrentSession(session);
-            dispatch(importLocalMessages(backup.messages as RootState["messages"]["messages"]));
-            alert("Đã nhập lịch sử vào phiên hiện tại. Dữ liệu không được tải lên máy chủ.");
+            if(file.size>MAX_CHAT_BACKUP_BYTES)throw new Error('Tệp sao lưu vượt 8 MiB.');
+            const text=await file.text();assertCurrentSession(session);
+            const contacts=store.getState().contacts;
+            const allowed=[...contacts.friends.map(f=>f.id),...contacts.groups.map(g=>roomChatId(g.id))];
+            const backup=parseChatBackup(text,currentUserId,allowed);
+            dispatch(importLocalMessages(backup));
+            alert(`Đã đọc ${backup.length} bản ghi hợp lệ. Bản sao chỉ hiển thị cục bộ, không xác nhận máy chủ; ID đã có sẽ không nhập lại.`);
         } catch(error) { alert(error instanceof Error ? error.message : "Không đọc được tệp sao lưu."); }
     };
 
@@ -658,6 +668,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                                     <ChatWindow key={`${currentUserId}:${currentChat?.id ?? 'empty'}`} chat={currentChat} currentUserId={currentUserId} onMessageSent={refreshUserList}
                                                 presenceError={presenceError} presenceChecking={presenceChecking}
                                                 onCheckPresence={checkSelectedPresence}
+                                                onOpenApiLog={() => {setApiLogs([...apiLogBuffer.current]);setApiLogOpen(true);}}
                                                 onRoomLeft={onGroupLeft}
                                                 unreadCount={unreadTotal} onOpenNotifications={() => setNotificationsOpen(true)}
                                                 onCompose={() => openCompose("people")} onOpenSettings={() => {setSettingsOpen(true);setActiveSection("Cài đặt");}}/>
@@ -704,7 +715,7 @@ function ChatWorkspace({ currentUserId }: { currentUserId: string }) {
                     <div className="lyra-modal-actions"><button type="button" disabled={composeBusy} onClick={() => setComposeOpen(false)}>Hủy</button><button type="submit" disabled={composeBusy || !composeValue.trim()}>{composeBusy ? "Đang chờ máy chủ..." : composeMode === "group" ? "Tạo nhóm" : composeMode === "join" ? "Tham gia" : "Bắt đầu trò chuyện"}</button></div>
                 </form>
             </div>}
-            {apiLogOpen && <div className="lyra-modal-backdrop" onMouseDown={e => {if (e.target === e.currentTarget) setApiLogOpen(false);}}><div className="lyra-modal lyra-log-modal"><h2>Nhật ký API WebSocket</h2><p>Chỉ hiển thị loại sự kiện, trạng thái và thời gian, không hiển thị mật khẩu hoặc nội dung tin nhắn.</p><div className="lyra-log-list">{apiLogs.length ? [...apiLogs].reverse().map((entry, index) => <div key={index}><time>{entry.at}</time><strong>{entry.direction}</strong><span>{entry.event}</span><small>{entry.status}</small></div>) : <p>Chưa có sự kiện mới kể từ khi mở ứng dụng.</p>}</div><div className="lyra-modal-actions"><button type="button" onClick={() => {apiLogBuffer.current=[];setApiLogs([]);}}>Xóa nhật ký</button><button type="button" onClick={() => setApiLogOpen(false)}>Đóng</button></div></div></div>}
+            {apiLogOpen && <div className="lyra-modal-backdrop" onMouseDown={e => {if (e.target === e.currentTarget) setApiLogOpen(false);}}><div className="lyra-modal lyra-log-modal"><h2>Nhật ký API WebSocket</h2><p>Hiển thị sự kiện, trạng thái, thời gian và mã chẩn đoán; không hiển thị mật khẩu, mã phiên hoặc nội dung tin nhắn.</p><div className="lyra-log-list">{apiLogs.length ? [...apiLogs].reverse().map((entry, index) => <div key={index}><time>{entry.at}</time><strong>{entry.direction}</strong><span>{entry.event}</span><small>{entry.status}{entry.detail ? ` ${entry.detail}` : ''}</small></div>) : <p>Chưa có sự kiện mới kể từ khi mở ứng dụng.</p>}</div><div className="lyra-modal-actions"><button type="button" onClick={() => {apiLogBuffer.current=[];setApiLogs([]);}}>Xóa nhật ký</button><button type="button" onClick={() => setApiLogOpen(false)}>Đóng</button></div></div></div>}
         </main>
     );
 }

@@ -1,6 +1,7 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import type { ChatMessage } from "../../types/chat";
 import { peopleChatService } from "../../services/peopleChatService.ts";
+import { mergeChatBackup } from "../../services/chatBackup.ts";
 import { mergeChatHistory } from "../../services/chatHistoryReconciliation.ts";
 import type { CreatedRoomMember } from "../../services/createRoomProtocol.ts";
 import { getRoomHistory } from "../../services/roomChatService.ts";
@@ -9,6 +10,7 @@ type ConversationHistoryState = {
   requestId?: string;
   requestedPage?: number;
   roomMembers?: CreatedRoomMember[];
+  roomMembersError?: string;
   loading: boolean;
   error: string | null;
   loadedPages: number[];
@@ -21,7 +23,7 @@ interface MessagesState {
 }
 
 type FetchHistoryArgs = { username: string; chatId: string; page?: number; force?: boolean };
-type FetchHistoryResult = { chatId: string; page: number; messages: ChatMessage[]; roomMembers?: CreatedRoomMember[] };
+type FetchHistoryResult = { chatId: string; page: number; messages: ChatMessage[]; roomMembers?: CreatedRoomMember[]; roomMembersError?: string };
 
 export const fetchPeopleChatHistory = createAsyncThunk<
     FetchHistoryResult,
@@ -45,12 +47,12 @@ export const fetchPeopleChatHistory = createAsyncThunk<
 export const fetchRoomChatHistory = createAsyncThunk<
     FetchHistoryResult, FetchHistoryArgs, {rejectValue:string}
 >('messages/fetchRoomChatHistory', async ({username,chatId,page=1},{rejectWithValue,signal})=>{
-  try { const result = await getRoomHistory(username,page,{signal}); return {chatId,page,messages:result.messages,roomMembers:result.room.user}; }
+  try { const result = await getRoomHistory(username,page,{signal}); return {chatId,page,messages:result.messages,roomMembers:result.room.user,roomMembersError:result.membersError}; }
   catch(error){return rejectWithValue(error instanceof Error?error.message:'Không tải được lịch sử nhóm.');}
 },{
-  condition:({chatId,page=1,force=false},{getState})=>{
+  condition:({chatId,username,page=1,force=false},{getState})=>{
     const state=getState() as {messages:MessagesState;contacts:{groups:{id:string}[]}};
-    if(!chatId.startsWith('room:') || !state.contacts.groups.some(group=>group.id.trim().toLowerCase()===chatId.slice(5).trim().toLowerCase()))return false;
+    if(!chatId.startsWith('room:') || username.trim().toLowerCase()!==chatId.slice(5).trim().toLowerCase() || !state.contacts.groups.some(group=>group.id.trim().toLowerCase()===chatId.slice(5).trim().toLowerCase()))return false;
     const history=state.messages.historyByChat[chatId];
     return !history?.loading && (force||!history?.loadedPages.includes(page));
   }
@@ -119,9 +121,7 @@ const messagesSlice = createSlice({
       );
     },
     importLocalMessages: (state, action: PayloadAction<ChatMessage[]>) => {
-      for (const item of action.payload) {
-        if (!state.messages.some(m => m.id === item.id && m.chatId === item.chatId)) state.messages.push(item);
-      }
+      state.messages = mergeChatBackup(state.messages,action.payload);
     },
     clearConversationMessages: (state, action: PayloadAction<string>) => {
       state.messages = state.messages.filter(message => message.chatId !== action.payload);
@@ -163,7 +163,7 @@ const messagesSlice = createSlice({
 
           const currentMessages = state.messages.filter(message => message.chatId === chatId);
           state.messages = state.messages.filter(message => message.chatId !== chatId);
-          state.messages.push(...mergeChatHistory(currentMessages, messages.map(message => ({...message, chatId}))));
+          state.messages.push(...mergeChatHistory(currentMessages, messages.map(message => ({...message, chatId, historyPage:page}))));
 
           history.loading = false;
           history.error = null;
@@ -206,11 +206,12 @@ const messagesSlice = createSlice({
 
           const currentMessages = state.messages.filter(message => message.chatId === chatId);
           state.messages = state.messages.filter(message => message.chatId !== chatId);
-          state.messages.push(...mergeChatHistory(currentMessages, messages.map(message => ({...message, chatId}))));
+          state.messages.push(...mergeChatHistory(currentMessages, messages.map(message => ({...message, chatId, historyPage:page}))));
 
           history.loading = false;
           history.error = null;
-          if (action.payload.roomMembers) history.roomMembers = action.payload.roomMembers;
+          if (action.payload.roomMembers !== undefined) history.roomMembers = action.payload.roomMembers;
+          history.roomMembersError = action.payload.roomMembersError;
           if (!history.loadedPages.includes(page)) history.loadedPages.push(page);
           history.loadedPages.sort((a, b) => a - b);
           if (page === Math.max(...history.loadedPages)) history.hasMore = messages.length === 50;

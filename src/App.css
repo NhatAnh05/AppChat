@@ -1795,3 +1795,65 @@ body { letter-spacing: 0; }
 .lyra-file-download { border:0; background:transparent; text-align:left; cursor:pointer; font:inherit; }
 .lyra-file-download:disabled { cursor:wait; opacity:.65; }
 .lyra-file-error { max-width:300px; margin:4px 6px; font-size:12px; overflow-wrap:anywhere; }
+
+/* HF3: shrink visual bubbles to the explicit intrinsic-width media wrapper.
+   Status and metadata must not stretch the media itself. */
+.lyra-workspace .message-row .message-bubble.has-visual-media {
+  box-sizing:border-box; display:block; width:max-content; max-width:100%; padding:5px;
+}
+.lyra-workspace .message-bubble.has-visual-media .chat-media { max-width:100%; }
+.lyra-workspace .message-bubble.has-visual-media .lyra-visual-media,
+.lyra-workspace .message-bubble.has-visual-media .lyra-visual-media img {
+  display:block; width:100%; max-width:100%; height:auto; max-height:300px;
+}
+.lyra-workspace .chat-header-info small { display:block; max-width:100%; overflow-wrap:anywhere; }
+
+/* P2: album and recorder use natural flow; no fixed aspect ratio or extra scroll region. */
+.lyra-workspace .lyra-media-single {max-width:100%;min-width:0;}
+.lyra-workspace .lyra-media-album {display:grid;grid-template-columns:minmax(0,1fr);gap:4px;width:360px;max-width:100%;min-width:0;}
+.lyra-workspace .lyra-media-album .chat-media {max-width:100%;min-width:0;}
+.lyra-workspace .lyra-media-album .message-content {grid-column:1/-1;}
+.lyra-workspace .chat-media audio {display:block;width:300px;max-width:100%;}
+.lyra-sticker {font-size:3rem;line-height:1.2;}
+.lyra-voice-controls {grid-column:1/-1;flex:0 0 100%;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:7px 10px;border:1px solid #8bb8ae;border-radius:9px;font-size:.85rem;}
+.lyra-voice-controls button {padding:5px 9px;border:1px solid currentColor;border-radius:6px;background:transparent;color:inherit;cursor:pointer;}
+/* P2 Hotfix: each visual run fills its row, mixed attachments retain their controls. */
+.lyra-workspace .message-row .message-bubble.has-album {box-sizing:border-box;max-width:100%;padding:5px;}
+.lyra-workspace .lyra-album-row {display:grid;grid-template-columns:minmax(0,1fr);gap:4px;min-width:0;}
+.lyra-workspace .lyra-album-row-2 {grid-template-columns:repeat(2,minmax(0,1fr));}
+.lyra-workspace .lyra-album-row-3 {grid-template-columns:repeat(3,minmax(0,1fr));}
+.lyra-workspace .lyra-album-tile {min-width:0;aspect-ratio:1;position:relative;overflow:hidden;border-radius:8px;}
+.lyra-workspace .lyra-album-row-1 .lyra-album-tile {aspect-ratio:16/9;}
+.lyra-workspace .lyra-album-tile .chat-media,
+.lyra-workspace .lyra-album-tile .lyra-visual-media,
+.lyra-workspace .lyra-album-tile .lyra-visual-media img {display:block;width:100%;height:100%;max-width:100%;max-height:none;object-fit:cover;border-radius:8px;}
+.lyra-workspace .lyra-album-tile .lyra-media-fallback {display:flex;position:absolute;inset:0;overflow:auto;max-width:none;max-height:100%;padding:4px;gap:3px;font-size:11px;align-content:center;}
+.lyra-workspace .lyra-album-tile .lyra-media-fallback span {flex:1 1 100%;}
+.lyra-workspace .lyra-bubble-anchor {position:relative;display:grid;grid-template-columns:minmax(0,1fr);justify-items:start;width:max-content;min-width:0;max-width:100%;}
+.lyra-workspace .message-row.sent .lyra-bubble-anchor {justify-items:end;}
+.lyra-workspace .lyra-bubble-anchor > .message-bubble {max-width:100%;}
+
+
+/* P2 Hotfix 2: inline viewer and microphone feedback. */
+.lyra-workspace .chat-media .lyra-viewer-trigger {border:0;padding:0;background:transparent;cursor:zoom-in;line-height:0;}
+.lyra-viewer-trigger:focus-visible {outline:2px solid #42b39b;outline-offset:2px;}
+.lyra-media-viewer {box-sizing:border-box;position:fixed;inset:0;margin:auto;width:min(1100px,96vw);height:min(850px,94dvh);max-width:96vw;max-height:94dvh;border:1px solid #394b4e;border-radius:12px;background:#141b20;color:#f5f8f7;padding:12px;overflow:hidden;}
+.lyra-media-viewer[open] {display:flex;flex-direction:column;gap:10px;}
+.lyra-media-viewer::backdrop {background:rgba(0,0,0,.78);}
+.lyra-media-viewer:fullscreen {width:100%;height:100%;max-width:none;max-height:none;border-radius:0;}
+.lyra-media-viewer header,.lyra-viewer-tools {display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.lyra-media-viewer header span {flex:1;min-width:0;overflow-wrap:anywhere;}
+.lyra-media-viewer button {background:#24353a;color:inherit;border:1px solid #53696d;border-radius:7px;padding:6px 10px;cursor:pointer;}
+.lyra-media-viewer button:disabled {opacity:.4;cursor:default;}
+.lyra-viewer-main {display:flex;align-items:center;gap:8px;flex:1;min-height:0;}
+.lyra-viewer-main>button {font-size:24px;flex:none;}
+.lyra-viewer-stage {display:grid;place-items:center;min-width:0;min-height:0;flex:1;height:100%;overflow:auto;}
+.lyra-viewer-stage>img {display:block;max-width:100%;max-height:100%;object-fit:contain;transform-origin:center;}
+.lyra-viewer-tools {justify-content:center;}
+.lyra-viewer-thumbs {display:flex;justify-content:safe center;gap:5px;overflow:auto;flex:none;}
+.lyra-viewer-thumbs button {padding:2px;flex:none;}
+.lyra-viewer-thumbs button[aria-current=true] {border-color:#6de3bd;outline:1px solid #6de3bd;}
+.lyra-viewer-thumbs img {display:block;width:54px;height:54px;object-fit:cover;border-radius:4px;}
+.lyra-voice-controls meter {width:100px;height:12px;}
+.lyra-voice-controls audio {max-width:100%;height:38px;}
+.lyra-voice-warning {color:#a35b13;flex-basis:100%;}

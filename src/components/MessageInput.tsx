@@ -1,3 +1,4 @@
+import VoicePreview from "./VoicePreview";
 import { currentSessionSignal, assertCurrentSession, isCurrentSession } from '../services/sessionScope.ts';
 import { type FormEvent, useState, useEffect, useRef } from "react";
 import { useDispatch, useSelector } from "react-redux";
@@ -6,10 +7,11 @@ import { peopleChatService, UnconfirmedSendError } from "../services/peopleChatS
 import { sendRoomMessage } from "../services/roomChatService.ts";
 import { roomNameFromChatId } from "../services/roomChatProtocol.ts";
 import { uploadMedia } from "../services/mediaUpload";
-import { encodeMediaMessage, type LyraMediaKind } from "../services/mediaMessage";
+import { encodeMediaMessage, encodeMediaCollection, type LyraMedia, type LyraMediaKind } from "../services/mediaMessage";
 import { makeReply, type ReplyReference } from "../services/messageInteractions";
 import type { AppDispatch, RootState } from "../store/store";
 import { hasLinkedServerHistory } from "../services/chatHistoryReconciliation.ts";
+import { useVoiceRecorder } from "../services/useVoiceRecorder.ts";
 import { readDraft, saveDraft } from "../services/conversationStorage.ts";
 
 type MessageInputProps = {
@@ -24,6 +26,7 @@ type MessageInputProps = {
 
 export default function MessageInput({ chatId, currentUserId, onMessageSent, isGroup = false, replyTo, mentionRequest, onCancelReply }: MessageInputProps) {
   const [workspaceSession] = useState(currentSessionSignal);
+  const voice = useVoiceRecorder(workspaceSession);
   const [content, setContent] = useState(() => readDraft(currentUserId, chatId));
   // Tự động lưu bản nháp theo tài khoản/hội thoại ngay khi nội dung thay đổi.
   useEffect(() => saveDraft(currentUserId, chatId, content), [currentUserId, chatId, content]);
@@ -132,6 +135,7 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
         dispatch(setMessageStatus({chatId,id:optimisticId,status:uncertain?'unconfirmed':'failed'}));
         if (uncertain) {
           setUncertainId(optimisticId);
+          if(clearInput || replyTo)onCancelReply?.();
           const args={username:isGroup?roomNameFromChatId(chatId):chatId,chatId,page:1,force:true};
           void dispatch(isGroup?fetchRoomChatHistory(args):fetchPeopleChatHistory(args));
         } else if (clearInput) setContent(previous => previous || content);
@@ -142,35 +146,46 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (uploadBusyRef.current || sendBusyRef.current) return;
+    if (uploadBusyRef.current || sendBusyRef.current || voice.phase!=="idle" || voice.file) return;
     setUncertainId(null);
     setInputError('');
+    if (!content.trim()) return;
     try { await sendContent(replyTo ? makeReply(content, replyTo) : content, true); }
     catch (error) { setInputError(error instanceof Error ? error.message : "Không gửi được tin nhắn."); }
   };
 
   const chooseMedia = (kind: LyraMediaKind) => {
-    if (uploadBusyRef.current || sendBusyRef.current) return;
+    if (uploadBusyRef.current || sendBusyRef.current || voice.phase!=="idle" || voice.file) return;
     setMediaMenuOpen(false);
     selectedKind.current = kind;
     if (fileInputRef.current) {
+      fileInputRef.current.multiple = kind === "image" || kind === "file";
       fileInputRef.current.accept = kind === "image" ? "image/*" : kind === "video" ? "video/*" : kind === "gif" ? "image/gif" : ".pdf,.txt,.csv,.zip,.docx,.xlsx,.pptx,image/*,video/*";
       fileInputRef.current.value = "";
       fileInputRef.current.click();
     }
   };
 
-  const handleMediaFile = async (file?: File) => {
-    if (!file || uploadBusyRef.current || sendBusyRef.current || !isCurrentSession(workspaceSession)) return;
+  const handleMediaFiles = async (files: File[], kind = selectedKind.current) => {
+    if (!files.length || uploadBusyRef.current || sendBusyRef.current || !isCurrentSession(workspaceSession)) return;
+    if (files.length > 5) {setInputError('Chọn tối đa 5 tệp mỗi lần.');return;}
+    if (files.some(file=>!file.size||file.size>25*1024*1024)) {setInputError('Mỗi tệp phải lớn hơn 0 và không vượt 25 MiB.');return;}
     uploadBusyRef.current = true;
     setUncertainId(null);
     setInputError('');
     setUploading(true);
     const session = workspaceSession;
     try {
-      const media = await uploadMedia(file, selectedKind.current, currentUserId, isGroup ? roomNameFromChatId(chatId) : chatId, isGroup, session);
+      const items:LyraMedia[]=[];
+      for(const file of files){
+        assertCurrentSession(session);
+        items.push(await uploadMedia(file, kind, currentUserId, isGroup ? roomNameFromChatId(chatId) : chatId, isGroup, session));
+      }
       assertCurrentSession(session);
-      await sendContent(encodeMediaMessage(media), false, session);
+      const encoded=items.length===1?encodeMediaMessage(items[0]):encodeMediaCollection(items);
+      if(kind==='audio')voice.clearFile(); // never retry an uncertain SEND_CHAT automatically
+      await sendContent(replyTo?makeReply(encoded,replyTo):encoded, false, session);
+      onCancelReply?.();
     } catch (error) {
       setInputError(error instanceof Error ? error.message : "Không gửi được tệp.");
     } finally { uploadBusyRef.current = false; setUploading(false); }
@@ -179,18 +194,20 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
   const kindFromFile = (file: File): LyraMediaKind => file.type === 'image/gif' ? 'gif' :
     file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : 'file';
   const pasteMedia = (event: React.ClipboardEvent<HTMLInputElement>) => {
-    const file = event.clipboardData.files.item(0);
-    if (!file) return; // Giữ nguyên thao tác dán văn bản thông thường.
+    const files = Array.from(event.clipboardData.files);
+    if (!files.length) return; // Giữ nguyên thao tác dán văn bản thông thường.
     event.preventDefault();
-    selectedKind.current = kindFromFile(file);
-    void handleMediaFile(file);
+    if(voice.phase!=='idle'||voice.file)return;
+    selectedKind.current = files.length===1?kindFromFile(files[0]):'file';
+    void handleMediaFiles(files);
   };
   const dropMedia = (event: React.DragEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const file = event.dataTransfer.files[0];
-    if (!file) return;
-    selectedKind.current = kindFromFile(file);
-    void handleMediaFile(file);
+    const files = Array.from(event.dataTransfer.files);
+    if (!files.length) return;
+    if(voice.phase!=='idle'||voice.file)return;
+    selectedKind.current = files.length===1?kindFromFile(files[0]):'file';
+    void handleMediaFiles(files);
   };
 
   return (
@@ -205,7 +222,16 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
           <div><strong>Trả lời {replyTo.sender}</strong><span>{replyTo.excerpt}</span></div>
           <button type="button" title="Hủy trả lời" aria-label="Hủy trả lời" onClick={onCancelReply}><i className="bi bi-x-lg" /></button>
         </div>}
-        <input ref={fileInputRef} type="file" hidden onChange={e => void handleMediaFile(e.target.files?.[0])} />
+        {(voice.phase!=='idle'||voice.file||voice.error||voice.warning) && <div className="lyra-voice-controls" role="status">
+          {voice.error && <span role="alert">{voice.error}</span>}
+          {voice.warning && <span className="lyra-voice-warning">{voice.warning}</span>}
+          {voice.phase==='permission'&&<span>Đang yêu cầu quyền microphone…</span>}
+          {voice.phase==='recording'&&<><span>Đang ghi âm · {voice.elapsed}s / 120s · {voice.device}</span><meter min={0} max={1} value={voice.level} aria-label="Mức tín hiệu microphone"/><button type="button" onClick={voice.stop}>Dừng</button></>}
+          {voice.phase==='stopping'&&<span>Đang hoàn tất bản ghi…</span>}
+          {voice.file&&<><span>Nghe thử trước khi gửi · {(voice.file.size/1024).toFixed(0)} KB</span><VoicePreview file={voice.file}/><button type="button" disabled={uploading||sending} onClick={()=>{if(voice.file)void handleMediaFiles([voice.file],'audio');}}>Gửi ghi âm</button></>}
+          <button type="button" disabled={uploading||sending} onClick={voice.cancel}>Hủy</button>
+        </div>}
+        <input ref={fileInputRef} type="file" hidden onChange={e => void handleMediaFiles(Array.from(e.target.files ?? []))} />
         <div className="media-attach-anchor" ref={mediaMenuRef}>
           <button
               type="button"
@@ -214,7 +240,7 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
               aria-label="Thêm nội dung đính kèm"
               aria-haspopup="menu"
               aria-expanded={mediaMenuOpen}
-              disabled={uploading || sending}
+              disabled={uploading || sending || voice.phase!=="idle" || Boolean(voice.file)}
               onClick={() => { setEmojiOpen(false); setMediaMenuOpen(open => !open); }}
           >
             <i className={`bi ${mediaMenuOpen ? "bi-x-lg" : "bi-plus-lg"}`} aria-hidden="true" />
@@ -228,10 +254,10 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
               </div>
           )}
         </div>
-        <button type="button" className="quick-action-button" title="Gửi hình ảnh" aria-label="Gửi hình ảnh" disabled={uploading || sending} onClick={() => chooseMedia("image")}>
+        <button type="button" className="quick-action-button" title="Gửi hình ảnh" aria-label="Gửi hình ảnh" disabled={uploading || sending || voice.phase!=="idle" || Boolean(voice.file)} onClick={() => chooseMedia("image")}>
           <i className="bi bi-image" aria-hidden="true" />
         </button>
-        <button type="button" className="quick-action-button" title="Đính kèm tệp" aria-label="Đính kèm tệp" disabled={uploading || sending} onClick={() => chooseMedia("file")}>
+        <button type="button" className="quick-action-button" title="Đính kèm tệp" aria-label="Đính kèm tệp" disabled={uploading || sending || voice.phase!=="idle" || Boolean(voice.file)} onClick={() => chooseMedia("file")}>
           <i className="bi bi-paperclip" aria-hidden="true" />
         </button>
         <div className="emoji-picker-anchor" ref={emojiPanelRef}>
@@ -266,10 +292,10 @@ export default function MessageInput({ chatId, currentUserId, onMessageSent, isG
             onPaste={pasteMedia}
             aria-label={"Nội dung tin nhắn"}
         />
-        <button type="button" className="voice-action-button" title="Ghi âm" aria-label="Ghi âm">
+        <button type="button" className="voice-action-button" title="Ghi âm" aria-label="Ghi âm" disabled={uploading||sending||voice.phase!=="idle"||Boolean(voice.file)} onClick={()=>void voice.start()}>
           <i className="bi bi-mic" aria-hidden="true" />
         </button>
-        <button className="send-button" type="submit" disabled={!content.trim() || uploading || sending}>
+        <button className="send-button" type="submit" disabled={!content.trim() || uploading || sending || voice.phase!=="idle" || Boolean(voice.file)}>
           {uploading ? "Đang tải..." : sending ? "Đang gửi..." : "Gửi"}
         </button>
       </form>
